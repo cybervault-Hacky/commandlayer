@@ -13,7 +13,15 @@ describe('buildPageContext', () => {
     expect(context.title).toBe('GitHub');
     expect(context.hostname).toBe('github.com');
     expect(context.url).toBe('https://github.com/');
-    expect(context.fetchedAt).toBe(FIXED.toISOString());
+    expect(context.capturedAt).toBe(FIXED.toISOString());
+    // Basic (tabs-API) contexts carry empty intelligence sections.
+    expect(context.headings).toEqual([]);
+    expect(context.paragraphs).toEqual([]);
+    expect(context.links).toEqual([]);
+    expect(context.tables).toEqual([]);
+    expect(context.forms).toEqual([]);
+    expect(context.selectedText).toBeNull();
+    expect(context.truncated).toBe(false);
   });
 
   it('strips www and ports for the display hostname', () => {

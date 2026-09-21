@@ -155,6 +155,50 @@ describe('background message handler', () => {
     }
   });
 
+  it('answers GET_PAGE_CONTEXT safely (no active tab → unavailable)', async () => {
+    // The base stub has no active tab, so the capture degrades to a safe,
+    // user-facing context instead of failing the message.
+    const result = await handleBackgroundMessage(
+      rawMessage(MessageType.GET_PAGE_CONTEXT),
+      TRUSTED,
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data).toMatchObject({
+        state: 'unavailable',
+        reason: 'no-tab',
+      });
+    }
+  });
+
+  it('accepts a valid sections payload for GET_PAGE_CONTEXT', async () => {
+    const result = await handleBackgroundMessage(
+      rawMessage(MessageType.GET_PAGE_CONTEXT, {
+        sections: ['metadata', 'headings'],
+      }),
+      TRUSTED,
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  it('rejects invalid sections payloads for GET_PAGE_CONTEXT', async () => {
+    for (const payload of [
+      { sections: 'headings' },
+      { sections: ['hacks'] },
+      { sections: Array.from({ length: 8 }, (_, i) => `s${i}`) },
+      { sections: [null] },
+    ]) {
+      const result = await handleBackgroundMessage(
+        rawMessage(MessageType.GET_PAGE_CONTEXT, payload),
+        TRUSTED,
+      );
+      expect(result.ok, JSON.stringify(payload)).toBe(false);
+      if (!result.ok) {
+        expect(result.error.code).toBe('INVALID_PAYLOAD');
+      }
+    }
+  });
+
   it('returns an unsupported-page context for browser pages', async () => {
     const stub = createChromeStub({
       activeTab: { id: 1, title: 'Extensions', url: 'chrome://extensions' },

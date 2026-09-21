@@ -2,7 +2,7 @@ import type { MessageType } from '../constants/messages';
 import type { QuickActionId } from '../constants/quickActions';
 import type { CommandSource } from './command';
 import type { CommandResult } from './command';
-import type { PageContext } from './page';
+import type { PageContext, PageSection } from './page';
 import type { Settings, SettingsPatch } from './settings';
 import type { ExtensionStatus } from './status';
 import type { ErrorCode } from '../constants/errors';
@@ -58,6 +58,10 @@ export interface MessageMap {
   };
   [MessageType.GET_CURRENT_PAGE]: {
     payload: NoPayload;
+    result: PageContext;
+  };
+  [MessageType.GET_PAGE_CONTEXT]: {
+    payload: { sections?: PageSection[] };
     result: PageContext;
   };
   [MessageType.COMMAND_SUBMIT]: {

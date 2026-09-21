@@ -1,40 +1,59 @@
 /**
- * Content-script foundation (Phase 1).
+ * Content script (Phase 2 — Page Intelligence).
  *
- * This module is intentionally NOT registered in the Phase 1 manifest —
- * page intelligence is a later phase. It defines the stable contract those
- * phases will use to read page metadata from the active document:
+ * Registered in the manifest for http/https pages only (see
+ * public/manifest.json → content_scripts). It does exactly one thing:
+ * when the background sends an EXTRACT_PAGE_REQUEST, it runs the Page
+ * Intelligence Engine once on the live document and replies with a
+ * sanitized, limit-capped PageContext.
  *
- *   1. A future phase registers this script (manifest `content_scripts`,
- *      or programmatic injection with `activeTab`).
- *   2. The background sends a typed message (e.g. cl:get-page-meta).
- *   3. This module replies with a sanitized PageContext via buildPageContext.
- *
- * Until then, current-page context is read from the tabs API in the
- * background, which keeps host permissions at zero.
+ * Hard invariants (enforced by construction, not by convention):
+ * - ON DEMAND only: no listeners for user activity, no observers, no polling
+ * - extraction only: no AI calls, no network requests, no command execution
+ * - no side effects: no clicks, no form submission, no DOM modification
+ * - no secrets: no input values (ever), no cookies, no storage, no history
+ * - strict input: anything that is not a valid ExtractPageRequest is
+ *   ignored — the script never responds to unknown message shapes
  */
-import { buildPageContext, type PageContextInput } from '@/shared/pageContext';
-import type { PageContext } from '@/shared/types/page';
+import { extractPageContext } from '@/page-intelligence';
+import {
+  isExtractPageRequest,
+  type ExtractPageResponse,
+} from '@/page-intelligence/protocol';
 
-export interface ContentPageMeta extends PageContextInput {
-  title: string;
-  url: string;
-}
+type SendResponse = (response: ExtractPageResponse) => void;
 
-/** Read metadata from a document without scraping its content. */
-export function collectPageMeta(doc: Document): ContentPageMeta {
-  let title = '';
-  let url = '';
+/**
+ * Handle one inbound raw message. Synchronous: sendResponse is always
+ * called exactly once (or not at all for foreign messages).
+ */
+export function handleContentMessage(raw: unknown, sendResponse: SendResponse): void {
+  if (!isExtractPageRequest(raw)) return; // foreign message — stay silent
+
   try {
-    title = doc.title ?? '';
-    url = doc.location?.href ?? '';
+    const context = extractPageContext(document, {
+      sections: raw.sections,
+    });
+    sendResponse({ ok: true, context });
   } catch {
-    // Security-sensitive documents can throw on access; degrade safely.
+    // A hostile or broken page must never take the extension down.
+    sendResponse({ ok: false, error: 'extraction-failed' });
   }
-  return { title, url };
 }
 
-/** Build a sanitized PageContext for the current document. */
-export function buildPageMetaContext(doc: Document): PageContext {
-  return buildPageContext(collectPageMeta(doc));
+function registerListener(): void {
+  try {
+    if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage?.addListener) {
+      chrome.runtime.onMessage.addListener(
+        (message: unknown, _sender: unknown, sendResponse: SendResponse) => {
+          handleContentMessage(message, sendResponse);
+        },
+      );
+    }
+  } catch {
+    // Registration can only fail in exotic/embedded contexts; the rest of
+    // the extension (tabs-API basic context) still works without it.
+  }
 }
+
+registerListener();

@@ -26,16 +26,21 @@ import {
   buildQuickActionRequest,
 } from '@/commands/requests';
 import { getSettings, updateSettings } from '@/storage/settings';
+import {
+  isPageSection,
+  sectionsForQuickAction,
+} from '@/page-intelligence/profiles';
 import type {
   CommandSource,
   QuickActionId,
 } from '@/shared/types/command';
+import type { PageSection } from '@/shared/types/page';
 import type {
   MessageEnvelope,
   MessageResult,
 } from '@/shared/types/message';
 import { getExtensionStatus } from './status';
-import { getCurrentPage } from './pageContext';
+import { getCurrentPage, getPageContext } from './pageContext';
 import { openCommandCenterTab, openSidePanelForActiveTab } from './openers';
 
 const COMMAND_SOURCES: ReadonlySet<string> = new Set([
@@ -114,6 +119,23 @@ function validateQuickActionPayload(
   return { actionId: payload.actionId, source: payload.source };
 }
 
+const MAX_SECTION_REQUESTS = 7;
+
+function validateGetPageContextPayload(
+  payload: unknown,
+): { sections?: PageSection[] } | null {
+  if (payload === undefined) return {};
+  if (!isRecord(payload)) return null;
+  if (payload.sections === undefined) return {};
+  if (!Array.isArray(payload.sections) || payload.sections.length > MAX_SECTION_REQUESTS) {
+    return null;
+  }
+  for (const section of payload.sections) {
+    if (!isPageSection(section)) return null;
+  }
+  return { sections: payload.sections as PageSection[] };
+}
+
 function validateSetSettingsPayload(
   payload: unknown,
 ): { patch: Record<string, unknown> } | null {
@@ -147,6 +169,17 @@ async function dispatchMessage(message: MessageEnvelope): Promise<unknown> {
       return getCurrentPage();
     }
 
+    case MessageType.GET_PAGE_CONTEXT: {
+      const payload = validateGetPageContextPayload(message.payload);
+      if (!payload) {
+        throw new CommandLayerError(
+          ErrorCode.INVALID_PAYLOAD,
+          USER_ERROR_MESSAGES[ErrorCode.INVALID_PAYLOAD],
+        );
+      }
+      return getPageContext({ sections: payload.sections });
+    }
+
     case MessageType.COMMAND_SUBMIT: {
       const payload = validateCommandSubmitPayload(message.payload);
       if (!payload) {
@@ -155,7 +188,9 @@ async function dispatchMessage(message: MessageEnvelope): Promise<unknown> {
           USER_ERROR_MESSAGES[ErrorCode.INVALID_PAYLOAD],
         );
       }
-      const context = await getCurrentPage();
+      // Every command is a user-initiated request → one on-demand capture
+      // of the active page for the command pipeline (safe on all failures).
+      const context = await getPageContext();
       const request = buildCommandRequest({
         text: payload.text,
         source: payload.source,
@@ -173,7 +208,9 @@ async function dispatchMessage(message: MessageEnvelope): Promise<unknown> {
           USER_ERROR_MESSAGES[ErrorCode.INVALID_PAYLOAD],
         );
       }
-      const context = await getCurrentPage();
+      // Each quick action requests only the sections it needs.
+      const sections = sectionsForQuickAction(payload.actionId);
+      const context = await getPageContext({ sections });
       const request = buildQuickActionRequest(
         payload.actionId,
         payload.source,

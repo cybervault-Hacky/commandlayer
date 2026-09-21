@@ -10,6 +10,8 @@ export const MessageType = {
   PING: 'cl:ping',
   GET_EXTENSION_STATUS: 'cl:get-extension-status',
   GET_CURRENT_PAGE: 'cl:get-current-page',
+  /** On-demand Page Intelligence capture of the active tab. */
+  GET_PAGE_CONTEXT: 'cl:get-page-context',
   COMMAND_SUBMIT: 'cl:command-submit',
   QUICK_ACTION: 'cl:quick-action',
   OPEN_COMMAND_CENTER: 'cl:open-command-center',

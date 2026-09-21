@@ -20,6 +20,12 @@ interface Manifest {
     string,
     { suggested_key?: { default?: string; mac?: string } }
   >;
+  content_scripts?: Array<{
+    matches?: string[];
+    js?: string[];
+    run_at?: string;
+    all_frames?: boolean;
+  }>;
   permissions?: string[];
   host_permissions?: string[];
   icons?: Record<string, string>;
@@ -76,14 +82,37 @@ describe('manifest.json (Manifest V3)', () => {
     expect(command?.suggested_key?.mac).toBe('Command+Shift+L');
   });
 
-  it('uses the minimal Phase 1 permission set', () => {
+  it('uses the minimal permission set (no host permissions needed)', () => {
     expect(manifest.permissions).toEqual(
       expect.arrayContaining(['storage', 'tabs', 'sidePanel', 'commands']),
     );
     for (const permission of manifest.permissions ?? []) {
       expect(FORBIDDEN_PERMISSIONS, permission).not.toContain(permission);
     }
+    // No host_permissions: the content script is registered via
+    // content_scripts matches, and tabs.sendMessage to our own script
+    // needs no host grant.
     expect(manifest.host_permissions ?? []).toHaveLength(0);
+  });
+
+  it('registers the extraction-only content script for http/https pages only', () => {
+    const scripts = manifest.content_scripts;
+    expect(scripts, 'content_scripts must be declared').toHaveLength(1);
+    const script = scripts?.[0];
+    // Broadest match that stays on the open web: browser-internal pages
+    // (chrome://, edge://, about:, Web Store, PDF viewer) never match.
+    expect(script?.matches).toEqual(['http://*/*', 'https://*/*']);
+    expect(script?.js).toEqual(['content.js']);
+    expect(script?.run_at).toBe('document_idle');
+    expect(script?.all_frames).toBe(false);
+  });
+
+  it('does not use <all_urls> anywhere', () => {
+    const everyMatch = (manifest.content_scripts ?? [])
+      .flatMap((s) => s.matches ?? []);
+    for (const match of [...(manifest.host_permissions ?? []), ...everyMatch]) {
+      expect(match, match).not.toBe('<all_urls>');
+    }
   });
 
   it('ships every declared icon asset', () => {

@@ -4,7 +4,11 @@ import {
   isUnsupportedPageUrl,
   parseSafeUrl,
 } from './security/url';
-import type { PageContext } from './types/page';
+import {
+  createEmptyPageContext,
+  type PageContext,
+  type PageContextState,
+} from './types/page';
 
 /** Raw values as they arrive from a tab or document — never trusted. */
 export interface PageContextInput {
@@ -12,43 +16,62 @@ export interface PageContextInput {
   url?: unknown;
 }
 
+function basicContext(
+  fields: Partial<PageContext> & { state: PageContextState },
+  now: Date,
+): PageContext {
+  return {
+    ...createEmptyPageContext(),
+    capturedAt: now.toISOString(),
+    ...fields,
+  };
+}
+
 /**
- * Pure, deterministic page-context builder. All input is validated and
- * sanitized; unknown/unsafe values degrade to 'unavailable' instead of
- * throwing.
+ * Pure, deterministic BASIC page-context builder (tabs-API data only).
+ * All input is validated and sanitized; unknown/unsafe values degrade to
+ * 'unavailable' instead of throwing. Intelligence sections are empty —
+ * they are filled by the Page Intelligence Engine on demand.
  */
 export function buildPageContext(
   input: PageContextInput,
   now: Date = new Date(),
 ): PageContext {
-  const fetchedAt = now.toISOString();
-  const title = sanitizeText(input.title, PAGE_CONTEXT_TITLE_MAX) ?? undefined;
+  const title =
+    sanitizeText(input.title, PAGE_CONTEXT_TITLE_MAX) ?? undefined;
   const rawUrl = typeof input.url === 'string' ? input.url.trim() : '';
 
   if (rawUrl.length === 0) {
-    return { state: 'unavailable', reason: 'no-tab', title, fetchedAt };
+    return basicContext({ state: 'unavailable', reason: 'no-tab', title }, now);
   }
 
   const safeUrl = parseSafeUrl(rawUrl);
   if (safeUrl) {
-    return {
-      state: 'ready',
-      title,
-      url: safeUrl.href,
-      hostname: displayHostname(safeUrl.hostname),
-      fetchedAt,
-    };
+    return basicContext(
+      {
+        state: 'ready',
+        title,
+        url: safeUrl.href,
+        hostname: displayHostname(safeUrl.hostname),
+      },
+      now,
+    );
   }
 
   if (isUnsupportedPageUrl(rawUrl)) {
-    return {
-      state: 'unsupported',
-      title,
-      url: rawUrl,
-      reason: 'browser-page',
-      fetchedAt,
-    };
+    return basicContext(
+      {
+        state: 'unsupported',
+        title,
+        url: rawUrl,
+        reason: 'browser-page',
+      },
+      now,
+    );
   }
 
-  return { state: 'unavailable', title, reason: 'error', fetchedAt };
+  return basicContext(
+    { state: 'unavailable', title, reason: 'error' },
+    now,
+  );
 }

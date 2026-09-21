@@ -9,11 +9,13 @@ import {
   useCommandPipeline,
 } from '@/shared/hooks/useCommandPipeline';
 import { usePageContext } from '@/shared/hooks/usePageContext';
+import { usePageIntelligence } from '@/shared/hooks/usePageIntelligence';
 import { useSettings } from '@/shared/hooks/useSettings';
 import { BrandMark, IconSettings } from '@/shared/components/icons';
 import { CommandInput } from '@/shared/components/CommandInput';
 import { CommandResultCard } from '@/shared/components/CommandResultCard';
 import { CurrentPageCard } from '@/shared/components/CurrentPageCard';
+import { PageInsightCard } from '@/shared/components/PageInsightCard';
 import { QuickActions } from '@/shared/components/QuickActions';
 import { SettingsView } from './components/SettingsView';
 import { FirstRunTip } from './components/FirstRunTip';
@@ -29,6 +31,7 @@ type PanelView = 'home' | 'settings';
 export function App() {
   const { settings, update } = useSettings();
   const { context, loading: pageLoading, refresh } = usePageContext();
+  const { insight, capturing, capture } = usePageIntelligence(context);
   const [view, setView] = useState<PanelView>('home');
   const [draft, setDraft] = useState('');
 
@@ -119,6 +122,19 @@ export function App() {
                 context={context}
                 loading={pageLoading}
                 onRefresh={refresh}
+              />
+            </section>
+
+            <section
+              className="cl-enter mt-3"
+              style={{ animationDelay: '240ms' }}
+              aria-label="Page insight"
+            >
+              <PageInsightCard
+                basicContext={context}
+                insight={insight}
+                capturing={capturing}
+                onCapture={() => void capture()}
               />
             </section>
 

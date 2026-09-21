@@ -11,6 +11,25 @@ import type { AIError, AIProvider, AIRequest, AIResponse } from './types';
 export const MOCK_RESPONSE_TEXT =
   'Command received.\n\nAI intelligence will be connected in a future phase.';
 
+/** Used when the command pipeline received a real (engine-captured) page context. */
+export const PAGE_CONTEXT_CAPTURED_TEXT =
+  'Page context captured successfully.\n\nThe AI reasoning engine will be connected in a future phase.';
+
+/** True when the request carries a context captured by the Page Intelligence Engine. */
+export function requestHasPageIntelligence(request: AIRequest): boolean {
+  const page = request.context?.page;
+  if (!page) return false;
+  if (page.state !== 'ready' && page.state !== 'partial') return false;
+  return (
+    page.headings.length > 0 ||
+    page.paragraphs.length > 0 ||
+    page.links.length > 0 ||
+    page.tables.length > 0 ||
+    page.forms.length > 0 ||
+    page.selectedText !== null
+  );
+}
+
 const MAX_PROMPT_LENGTH = 2000;
 
 let mockLatencyMs = 420;
@@ -55,7 +74,10 @@ export class MockAIProvider implements AIProvider {
     return {
       id: request.id,
       provider: this.id,
-      text: MOCK_RESPONSE_TEXT,
+      // Honest, context-aware acknowledgement: never claims AI analysis ran.
+      text: requestHasPageIntelligence(request)
+        ? PAGE_CONTEXT_CAPTURED_TEXT
+        : MOCK_RESPONSE_TEXT,
       finishedAt: new Date().toISOString(),
     };
   }

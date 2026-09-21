@@ -4,7 +4,7 @@
  */
 export const APP_NAME = 'CommandLayer';
 export const APP_VERSION = '0.1.0';
-export const PHASE_LABEL = 'Phase 1 Foundation';
+export const PHASE_LABEL = 'Phase 2 Page Intelligence';
 export const TAGLINE = 'Think once. Execute everywhere.';
 
 /** Maximum length of a stored page title (display truncation). */

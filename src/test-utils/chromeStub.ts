@@ -16,6 +16,13 @@ export interface ChromeStub {
   tabs: {
     query: ReturnType<typeof vi.fn>;
     create: ReturnType<typeof vi.fn>;
+    /**
+     * Phase 2: content-script channel. Default mirrors a real browser where
+     * no content script is reachable (e.g. restricted site access): rejects
+     * with the standard "receiving end does not exist" error. Tests that
+     * simulate the content side override the implementation.
+     */
+    sendMessage: ReturnType<typeof vi.fn>;
   };
   permissions: {
     contains: ReturnType<typeof vi.fn>;
@@ -55,6 +62,13 @@ export function createChromeStub(options: {
     tabs: {
       query: vi.fn(async () => (activeTab ? [activeTab] : [])),
       create: vi.fn(async () => ({ id: 99 })),
+      sendMessage: vi.fn(() =>
+        Promise.reject(
+          new Error(
+            'Could not establish connection. Receiving end does not exist.',
+          ),
+        ),
+      ),
     },
     permissions: {
       contains: vi.fn(async () => ({ hasPermission: true })),

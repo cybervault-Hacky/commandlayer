@@ -9,15 +9,23 @@ export interface CurrentPageCardProps {
 }
 
 const STATE_LABEL: Record<PageContext['state'], string> = {
+  'not-requested': 'Not requested',
+  requesting: 'Requesting',
   ready: 'Ready',
+  partial: 'Partial',
   unsupported: 'Unsupported page',
   unavailable: 'Unavailable',
+  'permission-required': 'Permission required',
 };
 
 const STATE_TONE: Record<PageContext['state'], StatusTone> = {
+  'not-requested': 'neutral',
+  requesting: 'accent',
   ready: 'success',
+  partial: 'warning',
   unsupported: 'warning',
   unavailable: 'neutral',
+  'permission-required': 'warning',
 };
 
 /**
@@ -51,7 +59,7 @@ export function CurrentPageCard({
           <div className="cl-skeleton h-4 w-3/4" />
           <div className="cl-skeleton h-3 w-1/3" />
         </div>
-      ) : context.state === 'ready' ? (
+      ) : context.state === 'ready' || context.state === 'partial' ? (
         <div className="cl-enter-fade mt-2.5">
           <p className="truncate text-[13px] font-medium text-text-primary">
             {context.title ?? 'Untitled page'}

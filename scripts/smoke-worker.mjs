@@ -11,6 +11,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { JSDOM } from 'jsdom';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const dist = join(root, 'dist');
@@ -27,6 +28,7 @@ function assert(condition, label) {
 for (const file of [
   'manifest.json',
   'background.js',
+  'content.js',
   'popup.html',
   'sidepanel.html',
   'command-center.html',
@@ -45,6 +47,24 @@ assert(manifest.background?.type === 'module', 'worker is a module');
 assert(manifest.action?.default_popup === 'popup.html', 'popup wired');
 assert(manifest.side_panel?.default_path === 'sidepanel.html', 'side panel wired');
 
+// Phase 2: content script registered for http/https pages only.
+const contentScripts = manifest.content_scripts ?? [];
+assert(contentScripts.length === 1, 'content script registered');
+assert(
+  JSON.stringify(contentScripts[0]?.matches) === JSON.stringify(['http://*/*', 'https://*/*']),
+  'content script matches only http/https pages',
+);
+assert(
+  contentScripts[0]?.js?.[0] === 'content.js',
+  'content script bundle wired',
+);
+const contentBundle = readFileSync(join(dist, 'content.js'), 'utf8');
+assert(
+  contentBundle.includes('cl:extract-page-context-request'),
+  'content bundle speaks the extraction protocol',
+);
+assert(!/fetch\(|XMLHttpRequest/.test(contentBundle), 'content bundle makes no network calls');
+
 // HTML pages reference assets that exist
 for (const page of ['popup.html', 'sidepanel.html', 'command-center.html']) {
   const html = readFileSync(join(dist, page), 'utf8');
@@ -56,6 +76,65 @@ for (const page of ['popup.html', 'sidepanel.html', 'command-center.html']) {
     );
   }
 }
+
+// --- simulated web page (jsdom) + REAL content bundle -----------------------
+// The smoke test loads the PRODUCTION content script (dist/content.js) into a
+// jsdom window with a small page fixture. `tabs.sendMessage` then forwards
+// the background's real request to that real listener, and the background
+// validates the real extraction result. Everything except the browser is the
+// actual shipped code.
+const PAGE_HTML = `<!doctype html>
+<html lang="en">
+<head>
+  <title>GitHub</title>
+  <meta name="description" content="Let anyone and anything generate and version code on GitHub.">
+  <link rel="canonical" href="https://github.com/">
+</head>
+<body>
+  <nav><a href="/pricing">Pricing</a></nav>
+  <article>
+    <h1>GitHub</h1>
+    <h2>For the world's code</h2>
+    <p>Git code hosting platform with code review, issues, pull requests, and CI.</p>
+    <p>Build, ship, and manage software alongside your team.</p>
+    <ul>
+      <li>Repositories</li>
+      <li>Actions</li>
+    </ul>
+    <table>
+      <thead><tr><th>Repository</th><th>Stars</th></tr></thead>
+      <tbody>
+        <tr><td>octocat/Hello-World</td><td>120</td></tr>
+        <tr><td>github/docs</td><td>87</td></tr>
+      </tbody>
+    </table>
+    <form method="post" action="/session">
+      <input type="text" name="login" aria-label="Username">
+      <input type="password" name="password" aria-label="Password">
+    </form>
+    <a href="/features">Features</a>
+    <a href="https://github.com/features">Features (dup)</a>
+    <a href="https://github.com/enterprise">Enterprise</a>
+    <script>var shouldNeverAppear = "tracking";</script>
+    <p style="display:none">Hidden text that must not be extracted</p>
+  </article>
+</body>
+</html>`;
+
+const dom = new JSDOM(PAGE_HTML, { url: 'https://github.com/', runScripts: 'outside-only' });
+let contentListener = null;
+dom.window.chrome = {
+  runtime: {
+    id: 'smoke-test-extension',
+    onMessage: {
+      addListener: (fn) => {
+        contentListener = fn;
+      },
+    },
+  },
+};
+dom.window.eval(readFileSync(join(dist, 'content.js'), 'utf8'));
+assert(typeof contentListener === 'function', 'content script registered its listener');
 
 // --- chrome shim ------------------------------------------------------------
 const listeners = {};
@@ -78,6 +157,18 @@ globalThis.chrome = {
   tabs: {
     query: async () => [{ id: 1, title: 'GitHub', url: 'https://github.com/' }],
     create: async () => ({ id: 99 }),
+    // Simulate the browser delivering the message to the page's content
+    // script (the REAL dist/content.js listener).
+    sendMessage: async (_tabId, message) => {
+      let response = undefined;
+      contentListener(message, { id: 'smoke-test-extension' }, (r) => {
+        response = r;
+      });
+      if (response === undefined) {
+        throw new Error('Could not establish connection. Receiving end does not exist.');
+      }
+      return response;
+    },
   },
   permissions: { contains: async () => ({ hasPermission: true }) },
   sidePanel: { open: async () => {} },
@@ -115,6 +206,54 @@ assert(page.data?.state === 'ready', 'page context ready');
 assert(page.data?.hostname === 'github.com', 'page hostname extracted');
 assert(page.data?.title === 'GitHub', 'page title extracted');
 
+const pageContext = await listeners.onMessage(
+  { v: 1, id: 's3b', type: 'cl:get-page-context' },
+  sender,
+);
+assert(pageContext.ok === true, 'GET_PAGE_CONTEXT resolves ok');
+assert(pageContext.data?.state === 'ready', 'page context captured as ready');
+assert(pageContext.data?.title === 'GitHub', 'context title read from document');
+assert(pageContext.data?.description, 'meta description captured');
+assert(pageContext.data?.language === 'en', 'document language captured');
+assert(pageContext.data?.canonicalUrl === 'https://github.com/', 'canonical URL captured');
+assert(pageContext.data?.headings?.length === 2, 'headings captured (H1 + H2)');
+assert(pageContext.data?.paragraphs?.length === 4, 'visible paragraphs captured');
+const contextJson = JSON.stringify(pageContext.data ?? {});
+assert(!contextJson.includes('Hidden text'), 'display:none text excluded');
+assert(!contextJson.includes('tracking'), 'script content excluded');
+assert(pageContext.data?.links?.length === 3, 'links normalized and de-duplicated');
+assert(pageContext.data?.tables?.length === 1, 'table captured');
+const passwordField = pageContext.data?.forms?.[0]?.fields?.find(
+  (f) => f?.type === 'password',
+);
+assert(!!passwordField, 'password field present (structural)');
+assert(
+  Object.keys(passwordField).sort().join(',') === 'label,name,required,type',
+  'password field exposes NO value key',
+);
+assert(!/["']value["']/.test(contextJson), 'no "value" key anywhere in context');
+assert(typeof pageContext.data?.contentHash === 'string', 'lightweight content hash present');
+
+const subset = await listeners.onMessage(
+  {
+    v: 1,
+    id: 's3c',
+    type: 'cl:get-page-context',
+    payload: { sections: ['metadata', 'headings'] },
+  },
+  sender,
+);
+assert(subset.ok === true, 'subset GET_PAGE_CONTEXT resolves ok');
+assert(subset.data?.headings?.length === 2, 'subset still extracts requested sections');
+assert(subset.data?.paragraphs?.length === 0, 'subset does not extract unrequested sections');
+
+const badSections = await listeners.onMessage(
+  { v: 1, id: 's3d', type: 'cl:get-page-context', payload: { sections: ['hacks'] } },
+  sender,
+);
+assert(badSections.ok === false, 'invalid sections rejected');
+assert(badSections.error?.code === 'INVALID_PAYLOAD', 'invalid sections code correct');
+
 const command = await listeners.onMessage(
   {
     v: 1,
@@ -127,11 +266,11 @@ const command = await listeners.onMessage(
 assert(command.ok === true, 'COMMAND_SUBMIT resolves ok');
 assert(command.data?.status === 'completed', 'command completed');
 assert(
-  command.data?.text?.includes('Command received'),
-  'command result text is the honest Phase 1 response',
+  command.data?.text?.includes('Page context captured successfully'),
+  'command received real page context via the engine',
 );
 assert(
-  command.data?.text?.includes('AI intelligence will be connected'),
+  command.data?.text?.includes('AI reasoning engine will be connected in a future phase'),
   'result does not pretend AI ran',
 );
 
