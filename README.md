@@ -7,6 +7,17 @@ founders, and knowledge workers. It is designed to grow into an intelligent
 layer that understands your current web context and eventually researches,
 understands, creates, automates, and executes work across the web.
 
+> **Phase 4 status:** CommandLayer adds a **Safe Action Engine**: bounded,
+> typed browser actions (read page, find text, scroll, click, type,
+> select) that follow a strict pipeline — **Preview → Permission →
+> Execute → Verify**. Actions are proposed by a deterministic planner,
+> shown to you as an explicit preview, and run **only after your explicit
+> approval** of that exact plan. Approvals are single-use, expire within
+> minutes, and are bound to the exact plan hash and page context.
+> Sensitive fields (passwords, payments, codes, keys) are always blocked.
+> **The AI reasoning engine still never performs actions and never has
+> unrestricted browser control.**
+>
 > **Phase 3 status:** CommandLayer is an Edge-first browser extension with
 > a working **Real AI Reasoning Engine**: user intents, a minimal
 > per-intent page context, prompt construction with strict injection
@@ -323,13 +334,108 @@ with zero configuration.
 - No provider API key storage in the extension.
 
 
+## Phase 4 scope — Safe Action Engine & Browser Execution
+
+**CommandLayer never gives the AI unrestricted browser control. Every
+executable action must pass typed validation, permission checks, context
+validation, and bounded execution.**
+
+Phase 4 introduces safe, bounded browser actions. The pipeline is:
+
+```
+User → CommandLayer → Intent → Page Intelligence → Deterministic planner
+     → Structured Action Plan → ACTION PREVIEW → USER PERMISSION
+     → EXECUTION (step by step) → VERIFICATION → RESULT
+```
+
+There is no path from AI output to execution: plans are produced only by
+the deterministic planner, stored only in the background service worker,
+and executed only after an explicit approval bound to the exact plan.
+
+### Supported actions (typed allowlist)
+
+| Action | Risk | What it does |
+| --- | --- | --- |
+| `READ_PAGE` | Read-only | Reuses Page Intelligence to summarize the page structure |
+| `FIND_TEXT` | Read-only | Bounded text search with context snippets; never mutates the page |
+| `SCROLL` | Low risk | Bounded scroll (per-step and per-plan distance caps, ≤ 3 ops/plan) |
+| `CLICK_ELEMENT` | Confirmation required | Clicks an element resolved by safe target, then revalidates it |
+| `TYPE_TEXT` | Confirmation required | Types into non-sensitive fields; verifies by boolean match only |
+| `SELECT_OPTION` | Confirmation required | Selects an option by visible label |
+
+Risk is fixed in the action registry — the AI can never set or influence
+it. `READ_PAGE`/`FIND_TEXT` are read-only, `SCROLL` is low risk, and
+`CLICK_ELEMENT`/`TYPE_TEXT`/`SELECT_OPTION` always require confirmation.
+
+### Element targeting (no selectors)
+
+Targets are restricted to three safe kinds:
+
+- **text** — the element's visible text (or accessible name for form fields)
+- **role + name** — an ARIA role from a closed allowlist plus its accessible name
+- **stable-id** — a strict identifier (`^[A-Za-z][A-Za-z0-9_-]{0,127}$`)
+
+There is deliberately **no raw CSS or XPath selector** targeting and no
+AI-provided coordinates. Targets are revalidated immediately before use.
+
+### Permission & execution model
+
+- **Preview first.** Every plan is shown before anything runs. "Yes" or
+  "do it" in the command box never grants permission — only the explicit
+  **Allow & run** button does.
+- **Plan binding.** The approved plan must equal the executed plan. A
+  deterministic plan hash covers the steps, tab, URL, and content hash;
+  any mismatch stops with `ACTION_PLAN_CHANGED`.
+- **Single-use, expiring approvals.** Approvals live only in worker
+  memory, are consumed on first execution, and expire after
+  `PLAN_TTL_MS` (120 s). There is no `ALLOW_ALL_ACTIONS` mode.
+- **Freshness checks.** Before executing, the engine re-checks the active
+  tab, URL, and (for target actions) the content hash. Any change stops
+  with `ACTION_CONTEXT_STALE`.
+- **Stop-on-failure.** A failed, blocked, or stale step halts the whole
+  plan; later steps never run. There is no automatic replanning
+  (`MAX_REPLANS = 0`) and no fake rollback.
+- **Verification.** Mutating steps report boolean/state verification only
+  — never field values.
+
+### Sensitive fields are always blocked
+
+`TYPE_TEXT` never runs against sensitive fields. Detection is
+conservative (type, `autocomplete` tokens, and label/name keywords), and
+uncertainty resolves to **block**. Sensitive values are never typed,
+logged, previewed, or returned. CommandLayer also never auto-submits
+forms, and actions like purchases, deletions, sending, or downloads are
+not in the allowlist.
+
+### Hard limits
+
+Centralized in `ACTION_LIMITS` (`src/actions/limits.ts`): ≤ 5 actions per
+plan, ≤ 500 chars per text payload, ≤ 200 chars per target/find query,
+≤ 5000 px per scroll and ≤ 15000 px total, ≤ 3 scroll ops/plan, ≤ 25 find
+matches, 120 s plan TTL, 5 s step budget, 0 replans.
+
+### What Phase 4 does not do
+
+- No email/message sending, purchases, deletions, uploads/downloads, or
+  sensitive-form submission.
+- No account deletion, payments, or financial actions.
+- No third-party integrations (GitHub/Gmail/Slack/Notion/Jira).
+- No autonomous agents, workflows, scheduled automation, or long-term memory.
+- No arbitrary JavaScript, shell, or browser-API execution — ever.
+
+See `docs/action-engine.md` for the full architecture and security model.
+
+---
+
 ## Architecture
 
 ```
 src/
 ├── background/        Service worker: lifecycle, typed message routing,
-│                      page-context capture, command dispatch, keyboard cmd
-├── content/           Content script (registered; extraction-only)
+│                      page-context capture, command dispatch, action
+│                      session (approval + execution), keyboard cmd
+├── content/           Content script: on-demand extraction + bounded,
+│                      validated action steps
 ├── page-intelligence/ Page Intelligence Engine: extractors, limits,
 │                      sanitizer, visibility, validator, capture profiles
 ├── popup/             Compact launcher UI
@@ -338,7 +444,9 @@ src/
 ├── ai/                Real AI reasoning engine: intents, context builder,
 │                      prompts, parser/validator, gateway contract,
 │                      providers (local mock + secure gateway), client
-├── actions/           Action abstraction (types + registry, empty in P1)
+├── actions/           Safe Action Engine: typed allowlist, validator,
+│                      planner, plan hash, permissions, state machine,
+│                      executor, content-side runtime, sensitive guard
 ├── integrations/      Integration architecture (registry, empty in P1)
 ├── memory/            Memory abstraction (session-only store)
 ├── permissions/       Permission utilities
@@ -671,7 +779,17 @@ form-value guarantees on the production bundles.
 
 ---
 
-## Current limitations (Phase 3)
+## Current limitations (Phase 4)
+
+- **Actions are bounded and explicit.** Only the six typed actions in the
+  allowlist exist; every plan needs your approval, and there is no
+  bulk/always-allow mode, no autonomous replanning, and no multi-step
+  background automation.
+- **Action phrasing is pattern-based.** The deterministic planner
+  understands explicit phrasings like `find "pricing"`, `scroll down`,
+  `click the "Save" button`, `type "Mumbai" into the "City" field`,
+  `select "India" in the "Country" dropdown`, `read this page`. Free-form
+  action requests fall through to reasoning instead.
 
 - **Default reasoning is the built-in local mock provider.** It is fully
   functional and deterministic (summaries/analyses/explanations grounded
@@ -711,15 +829,16 @@ form-value guarantees on the production bundles.
   intent resolution, per-intent context building, injection-defended
   prompts, validated responses, and the Secure Gateway contract for
   secret-free provider connectivity.
-- **Phase 4:** web research & summarization built on page intelligence
-  (multi-page context, with user-controlled scope) — including real
-  implementations of Research/Compare, which were deliberately removed
-  from the UI in Phase 3 rather than mocked.
-- **Phase 5:** permissioned actions (action registry + confirmation
-  flows) for read/write operations on the current page.
-- **Phase 6:** integrations (GitHub, Gmail, Slack, Notion, Jira) through
-  the integration registry, with user-controlled OAuth.
-- **Phase 7:** persistent memory and multi-step task execution.
+- **Phase 4 (delivered):** the Safe Action Engine — typed, bounded
+  browser actions with preview → permission → execute → verify, plan-hash
+  binding, single-use expiring approvals, freshness checks, sensitive-
+  field blocking, and stop-on-failure execution.
+- **Future candidates (not started):** multi-page research and
+  cross-tab comparison (Research/Compare were deliberately removed from
+  the UI rather than mocked), a wider typed action vocabulary,
+  integrations through the integration registry, and session continuity.
+  Anything that executes stays bound to the same safety pipeline:
+  preview, explicit permission, bounded execution, verification.
 
 Each phase builds on the abstractions established here — no rewrites of
 the UI, messaging, storage, pipeline, or page-intelligence contracts are

@@ -10,6 +10,7 @@ import {
 } from '@/shared/constants/errors';
 import { MessageType } from '@/shared/constants/messages';
 import { sendMessage } from '@/shared/messaging/client';
+import type { ActionPlan } from '@/actions/types';
 import type { CommandSource, QuickActionId } from '@/shared/types/command';
 import type { CommandResult } from '@/shared/types/command';
 import type { MessageResult } from '@/shared/types/message';
@@ -27,6 +28,14 @@ export interface UseCommandPipelineResult extends PipelineState {
   submitText: (text: string, quickAction?: QuickActionId) => Promise<void>;
   /** Trigger a quick action through the QUICK_ACTION pipeline. */
   submitQuickAction: (actionId: QuickActionId) => Promise<void>;
+  /**
+   * Phase 4 — explicit approval + execution of a previewed plan. Sends
+   * ONLY the plan identity; the background enforces hash binding,
+   * freshness, and single-use approval.
+   */
+  executePlan: (plan: ActionPlan) => Promise<void>;
+  /** Withdraw approval for a pending plan (Cancel button / Escape). */
+  cancelPlan: (planId: string) => Promise<void>;
   /** Re-run the last submitted command (enabled only when retryable). */
   retry: () => Promise<void>;
   reset: () => void;
@@ -130,11 +139,17 @@ export function useCommandPipeline(
     [run, source],
   );
 
-  const retry = useCallback(async () => {
-    const execute = lastExecuteRef.current;
-    if (!execute) return;
-    await run(execute);
-  }, [run]);
+  const executePlan = useCallback(
+    (plan: ActionPlan) =>
+      run(() =>
+        sendMessage(MessageType.ACTION_EXECUTE, {
+          planId: plan.planId,
+          planHash: plan.planHash,
+          source,
+        }),
+      ),
+    [run, source],
+  );
 
   const reset = useCallback(() => {
     runSeqRef.current += 1;
@@ -142,12 +157,30 @@ export function useCommandPipeline(
     setState({ phase: 'idle', result: null, errorMessage: null });
   }, []);
 
+  const cancelPlan = useCallback(
+    async (planId: string) => {
+      // Fire-and-forget withdrawal (sendMessage never throws); the UI
+      // state resets regardless of the transport outcome.
+      void sendMessage(MessageType.ACTION_CANCEL, { planId });
+      reset();
+    },
+    [reset],
+  );
+
+  const retry = useCallback(async () => {
+    const execute = lastExecuteRef.current;
+    if (!execute) return;
+    await run(execute);
+  }, [run]);
+
   return {
     phase: state.phase,
     result: state.result,
     errorMessage: state.errorMessage,
     submitText,
     submitQuickAction,
+    executePlan,
+    cancelPlan,
     retry,
     reset,
   };

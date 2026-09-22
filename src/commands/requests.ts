@@ -18,6 +18,7 @@ export function buildCommandRequest(input: {
   source: CommandSource;
   quickAction?: QuickActionId;
   context: PageContext | null;
+  tabId?: number;
 }): CommandRequest {
   return {
     id: createRequestId('cmd'),
@@ -25,6 +26,7 @@ export function buildCommandRequest(input: {
     source: input.source,
     ...(input.quickAction ? { quickAction: input.quickAction } : {}),
     context: input.context,
+    ...(input.tabId !== undefined ? { tabId: input.tabId } : {}),
     createdAt: new Date().toISOString(),
   };
 }

@@ -1,6 +1,7 @@
 import type { PageContext } from './page';
 import type { QuickActionId as QuickActionIdType } from '../constants/quickActions';
 import type { AIIntent, AIResponse } from '@/ai/types';
+import type { ActionPlan, ActionExecutionResult } from '@/actions/types';
 
 export type QuickActionId = QuickActionIdType;
 
@@ -32,6 +33,12 @@ export interface CommandRequest {
   source: CommandSource;
   quickAction?: QuickActionId;
   context: PageContext | null;
+  /**
+   * Phase 4 — the tab the command was issued against. Required for
+   * action planning (freshness binding); absent for pure reasoning in
+   * contexts without a tab identity.
+   */
+  tabId?: number;
   createdAt: string;
 }
 
@@ -49,6 +56,13 @@ export interface CommandResult {
   intent?: AIIntent;
   /** The validated AI response (present on completed commands). */
   ai?: AIResponse;
+  /**
+   * Phase 4 — a proposed action plan awaiting the user's explicit
+   * approval (status is 'completed'; nothing has executed).
+   */
+  plan?: ActionPlan;
+  /** Phase 4 — the terminal outcome of an executed action plan. */
+  execution?: ActionExecutionResult;
   /** Whether a retry may succeed (transient errors only). */
   retryable?: boolean;
   errorCode?: string;

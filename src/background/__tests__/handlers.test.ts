@@ -12,6 +12,9 @@ import { __resetTransportForTests } from '@/shared/messaging/transport';
 import { resetMockProvider, setMockProviderLatency } from '@/ai/mockProvider';
 import { extractPageContext } from '@/page-intelligence';
 import { isExtractPageRequest } from '@/page-intelligence/protocol';
+import { handleContentMessage } from '@/content/contentScript';
+import { actionSessionStore } from '@/actions/session';
+import { permissionLedger } from '@/actions/permissions';
 import type { CommandResult } from '@/shared/types/command';
 import type { ExtensionStatus } from '@/shared/types/status';
 import type { PageContext } from '@/shared/types/page';
@@ -79,7 +82,7 @@ describe('background message handler', () => {
     );
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.data).toEqual({ pong: true, version: '0.2.0' });
+      expect(result.data).toEqual({ pong: true, version: '0.3.0' });
     }
   });
 
@@ -314,6 +317,269 @@ describe('background message handler', () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.data).toMatchObject({ state: 'unsupported' });
+    }
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Phase 4 — action approval + execution over the message bus          */
+/* ------------------------------------------------------------------ */
+
+const ACTION_PAGE_HTML = `<!doctype html>
+<html lang="en">
+<head><title>Console</title></head>
+<body>
+  <h1>Console</h1>
+  <p>Manage your workspace settings.</p>
+  <button id="menuBtn" aria-expanded="false"
+    onclick="this.setAttribute('aria-expanded', 'true')">Menu</button>
+  <input id="city" aria-label="City" type="text" />
+  <input id="pw" aria-label="Password" type="password" />
+</body>
+</html>`;
+
+/** Wire the REAL content script (extraction + action steps) to the stub. */
+function wireActionPage(stub: ChromeStub, url: string): JSDOM {
+  // runScripts:'dangerously' is confined to this local test fixture so the
+  // button's inline onclick can demonstrate observable click effects.
+  const dom = new JSDOM(ACTION_PAGE_HTML, { url, runScripts: 'dangerously' });
+  vi.stubGlobal('document', dom.window.document);
+
+  // JSDOM has no layout: give elements a non-empty box (visibility
+  // revalidation) and a safe scrollTo.
+  vi.spyOn(dom.window.Element.prototype, 'getBoundingClientRect').mockImplementation(
+    () =>
+      ({ x: 0, y: 0, width: 120, height: 32, top: 0, right: 120, bottom: 32, left: 0, toJSON: () => ({}) }) as DOMRect,
+  );
+  Object.defineProperty(dom.window, 'scrollTo', {
+    value: () => undefined,
+    configurable: true,
+  });
+  stub.tabs.sendMessage.mockImplementation(
+    async (_tabId: number, message: unknown) => {
+      let response: unknown;
+      // handleContentMessage validates BOTH request kinds itself.
+      handleContentMessage(message, (r) => {
+        response = r;
+      });
+      if (response === undefined) {
+        throw new Error(
+          'Could not establish connection. Receiving end does not exist.',
+        );
+      }
+      return response;
+    },
+  );
+  return dom;
+}
+
+function asCommandResult(result: { ok: boolean; data?: unknown }): CommandResult {
+  return result.data as CommandResult;
+}
+
+describe('background action handlers (Phase 4)', () => {
+  beforeEach(() => {
+    installChromeStub(createChromeStub());
+    resetMockProvider();
+    actionSessionStore.clear();
+    permissionLedger.clear();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    uninstallChromeStub();
+    vi.restoreAllMocks();
+    actionSessionStore.clear();
+    permissionLedger.clear();
+  });
+
+  it('rejects invalid ACTION_EXECUTE payloads', async () => {
+    for (const payload of [
+      undefined,
+      {},
+      { planId: 'p' },
+      { planHash: 'h' },
+      { planId: 'p', planHash: 'h' }, // missing source
+      { planId: 'p', planHash: 'h', source: 'evil' },
+      { planId: '', planHash: 'h', source: 'sidepanel' },
+    ]) {
+      const result = await handleBackgroundMessage(
+        rawMessage(MessageType.ACTION_EXECUTE, payload),
+        TRUSTED,
+      );
+      expect(result.ok, JSON.stringify(payload)).toBe(false);
+      if (!result.ok) expect(result.error.code).toBe('INVALID_PAYLOAD');
+    }
+  });
+
+  it('rejects invalid ACTION_CANCEL payloads', async () => {
+    for (const payload of [undefined, {}, { planId: 42 }, { planId: '' }]) {
+      const result = await handleBackgroundMessage(
+        rawMessage(MessageType.ACTION_CANCEL, payload),
+        TRUSTED,
+      );
+      expect(result.ok, JSON.stringify(payload)).toBe(false);
+      if (!result.ok) expect(result.error.code).toBe('INVALID_PAYLOAD');
+    }
+  });
+
+  it('fails ACTION_EXECUTE for an unknown plan id', async () => {
+    const result = await handleBackgroundMessage(
+      rawMessage(MessageType.ACTION_EXECUTE, {
+        planId: 'plan-nope',
+        planHash: 'h',
+        source: 'sidepanel',
+      }),
+      TRUSTED,
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const data = asCommandResult(result);
+      expect(data.status).toBe('failed');
+      expect(data.errorCode).toBe('ACTION_PLAN_UNKNOWN');
+    }
+  });
+
+  it('full flow: command → plan preview → explicit approval → execution → verification', async () => {
+    const url = 'https://console.example.com/settings';
+    const stub = createChromeStub({
+      activeTab: { id: 5, title: 'Console', url },
+    });
+    installChromeStub(stub);
+    const dom = wireActionPage(stub, url);
+
+    // 1. The user's command produces a PLAN (nothing runs).
+    const planned = await handleBackgroundMessage(
+      rawMessage(MessageType.COMMAND_SUBMIT, {
+        text: 'click the "Menu" button',
+        source: 'sidepanel',
+      }),
+      TRUSTED,
+    );
+    expect(planned.ok).toBe(true);
+    if (!planned.ok) return;
+    const plannedData = asCommandResult(planned);
+    const plan = plannedData.plan!;
+    expect(plan).toBeDefined();
+    expect(plannedData.execution).toBeUndefined();
+    expect(
+      dom.window.document.getElementById('menuBtn')?.getAttribute('aria-expanded'),
+    ).toBe('false'); // still untouched
+
+    // 2. Explicit approval via ACTION_EXECUTE (planId + planHash only).
+    const executed = await handleBackgroundMessage(
+      rawMessage(MessageType.ACTION_EXECUTE, {
+        planId: plan.planId,
+        planHash: plan.planHash,
+        source: 'sidepanel',
+      }),
+      TRUSTED,
+    );
+    expect(executed.ok).toBe(true);
+    if (executed.ok) {
+      const data = asCommandResult(executed);
+      expect(data.status).toBe('completed');
+      expect(data.execution?.status).toBe('completed');
+      expect(data.execution?.steps[0]?.verification?.ok).toBe(true);
+    }
+    expect(
+      dom.window.document.getElementById('menuBtn')?.getAttribute('aria-expanded'),
+    ).toBe('true'); // the click really happened
+
+    // 3. The approval was single-use: the plan is gone now.
+    const rerun = await handleBackgroundMessage(
+      rawMessage(MessageType.ACTION_EXECUTE, {
+        planId: plan.planId,
+        planHash: plan.planHash,
+        source: 'sidepanel',
+      }),
+      TRUSTED,
+    );
+    if (rerun.ok) {
+      const data = asCommandResult(rerun);
+      expect(data.status).toBe('failed');
+      expect(data.errorCode).toBe('ACTION_PLAN_UNKNOWN');
+    }
+  });
+
+  it('blocks typing into sensitive fields at execution time, even when approved', async () => {
+    const url = 'https://console.example.com/settings';
+    const stub = createChromeStub({
+      activeTab: { id: 5, title: 'Console', url },
+    });
+    installChromeStub(stub);
+    const dom = wireActionPage(stub, url);
+
+    const planned = await handleBackgroundMessage(
+      rawMessage(MessageType.COMMAND_SUBMIT, {
+        text: 'type "hunter2" into the "Password" field',
+        source: 'sidepanel',
+      }),
+      TRUSTED,
+    );
+    expect(planned.ok).toBe(true);
+    if (!planned.ok) return;
+    const plan = asCommandResult(planned).plan!;
+    expect(plan.actions[0]!.action.type).toBe('TYPE_TEXT');
+
+    const executed = await handleBackgroundMessage(
+      rawMessage(MessageType.ACTION_EXECUTE, {
+        planId: plan.planId,
+        planHash: plan.planHash,
+        source: 'sidepanel',
+      }),
+      TRUSTED,
+    );
+    expect(executed.ok).toBe(true);
+    if (executed.ok) {
+      const data = asCommandResult(executed);
+      expect(data.status).toBe('failed');
+      expect(data.execution?.status).toBe('blocked');
+      expect(data.execution?.steps[0]?.status).toBe('blocked');
+      // The secret never reaches the field…
+      expect((dom.window.document.getElementById('pw') as HTMLInputElement).value).toBe('');
+      // …nor the result payload.
+      expect(JSON.stringify(data)).not.toContain('hunter2');
+    }
+  });
+
+  it('ACTION_CANCEL withdraws a pending plan', async () => {
+    const url = 'https://console.example.com/settings';
+    const stub = createChromeStub({
+      activeTab: { id: 5, title: 'Console', url },
+    });
+    installChromeStub(stub);
+    wireActionPage(stub, url);
+
+    const planned = await handleBackgroundMessage(
+      rawMessage(MessageType.COMMAND_SUBMIT, {
+        text: 'scroll down',
+        source: 'sidepanel',
+      }),
+      TRUSTED,
+    );
+    if (!planned.ok) throw new Error('expected plan');
+    const plan = asCommandResult(planned).plan!;
+
+    const cancelled = await handleBackgroundMessage(
+      rawMessage(MessageType.ACTION_CANCEL, { planId: plan.planId }),
+      TRUSTED,
+    );
+    expect(cancelled.ok).toBe(true);
+    if (cancelled.ok) expect(cancelled.data).toEqual({ cancelled: true });
+
+    const executed = await handleBackgroundMessage(
+      rawMessage(MessageType.ACTION_EXECUTE, {
+        planId: plan.planId,
+        planHash: plan.planHash,
+        source: 'sidepanel',
+      }),
+      TRUSTED,
+    );
+    if (executed.ok) {
+      const data = asCommandResult(executed);
+      expect(data.status).toBe('failed');
+      expect(data.errorCode).toBe('ACTION_PLAN_UNKNOWN');
     }
   });
 });

@@ -42,6 +42,21 @@ export interface QuickActionPayload {
   source: CommandSource;
 }
 
+/**
+ * Phase 4 — approval payload. Carries ONLY the plan identity; the
+ * background looks up the stored plan and re-derives the hash. The UI
+ * cannot supply a plan body, so an approved plan can never be swapped.
+ */
+export interface ActionExecutePayload {
+  planId: string;
+  planHash: string;
+  source: CommandSource;
+}
+
+export interface ActionCancelPayload {
+  planId: string;
+}
+
 export interface NoPayload {
   [key: string]: never;
 }
@@ -71,6 +86,14 @@ export interface MessageMap {
   [MessageType.QUICK_ACTION]: {
     payload: QuickActionPayload;
     result: CommandResult;
+  };
+  [MessageType.ACTION_EXECUTE]: {
+    payload: ActionExecutePayload;
+    result: CommandResult;
+  };
+  [MessageType.ACTION_CANCEL]: {
+    payload: ActionCancelPayload;
+    result: { cancelled: true };
   };
   [MessageType.OPEN_COMMAND_CENTER]: {
     payload: NoPayload;

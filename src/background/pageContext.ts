@@ -41,6 +41,12 @@ async function getActiveTab(): Promise<{ id: number; title?: string; url?: strin
   }
 }
 
+/** Active tab id (Phase 4 freshness binding) or undefined. */
+export async function getActiveTabId(): Promise<number | undefined> {
+  const tab = await getActiveTab();
+  return tab?.id;
+}
+
 /**
  * Page Intelligence capture (Phase 2).
  *

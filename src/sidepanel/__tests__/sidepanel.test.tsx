@@ -83,7 +83,7 @@ describe('Side Panel (intelligence interface)', () => {
 
     expect(screen.getByLabelText('Command')).toBeInTheDocument();
     expect(
-      screen.getByPlaceholderText(/what do you want to know/i),
+      screen.getByPlaceholderText(/ask, or say/i),
     ).toBeInTheDocument();
 
     for (const label of ['Analyze', 'Summarize', 'Explain', 'Extract']) {

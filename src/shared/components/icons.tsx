@@ -216,6 +216,111 @@ export function IconTrash(props: IconProps) {
   );
 }
 
+/* --- Phase 4: action engine --- */
+
+export function IconReadPage(props: IconProps) {
+  const { size = 16, ...rest } = props;
+  return (
+    <svg {...svgProps(size, rest)}>
+      <path d="M6 3h9l4 4v14H6z" />
+      <path d="M15 3v4h4" />
+      <path d="M9.5 12h6M9.5 15.5h6M9.5 19h3.5" />
+    </svg>
+  );
+}
+
+export function IconScrollAction(props: IconProps) {
+  const { size = 16, ...rest } = props;
+  return (
+    <svg {...svgProps(size, rest)}>
+      <path d="M12 4v16" />
+      <path d="m8.5 7.5 3.5-3.5 3.5 3.5" />
+      <path d="m8.5 16.5 3.5 3.5 3.5-3.5" />
+    </svg>
+  );
+}
+
+export function IconFindText(props: IconProps) {
+  const { size = 16, ...rest } = props;
+  return (
+    <svg {...svgProps(size, rest)}>
+      <circle cx="10.5" cy="10.5" r="6" />
+      <path d="m20 20-5.2-5.2" />
+      <path d="M8 9.5h5M8 12h3.5" />
+    </svg>
+  );
+}
+
+export function IconClickAction(props: IconProps) {
+  const { size = 16, ...rest } = props;
+  return (
+    <svg {...svgProps(size, rest)}>
+      <path d="M10.5 9.5 20 13l-4.2 1.7L14 19z" />
+      <path d="M10.5 9.5 5.6 4.6" />
+      <path d="M9.2 2.8A7 7 0 0 0 2.8 9.2" />
+      <path d="M11.2 21.2A7 7 0 0 0 21.2 11.2" />
+    </svg>
+  );
+}
+
+export function IconTypeAction(props: IconProps) {
+  const { size = 16, ...rest } = props;
+  return (
+    <svg {...svgProps(size, rest)}>
+      <path d="M9 4h6M12 4v16M9 20h6" />
+    </svg>
+  );
+}
+
+export function IconSelectAction(props: IconProps) {
+  const { size = 16, ...rest } = props;
+  return (
+    <svg {...svgProps(size, rest)}>
+      <rect x="3.5" y="6" width="17" height="5" rx="1.5" />
+      <path d="m10 8.5 2 1.8 2-1.8" />
+      <path d="M3.5 14h17M3.5 17.5h17" />
+    </svg>
+  );
+}
+
+export function IconPlay(props: IconProps) {
+  const { size = 16, ...rest } = props;
+  return (
+    <svg {...svgProps(size, rest)}>
+      <path d="M8 5.5v13l11-6.5z" />
+    </svg>
+  );
+}
+
+export function IconCircle(props: IconProps) {
+  const { size = 16, ...rest } = props;
+  return (
+    <svg {...svgProps(size, rest)}>
+      <circle cx="12" cy="12" r="7" />
+    </svg>
+  );
+}
+
+export function IconCircleDot(props: IconProps) {
+  const { size = 16, ...rest } = props;
+  return (
+    <svg {...svgProps(size, rest)}>
+      <circle cx="12" cy="12" r="7" />
+      <circle cx="12" cy="12" r="2.2" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+export function IconShieldCheck(props: IconProps) {
+  const { size = 16, ...rest } = props;
+  return (
+    <svg {...svgProps(size, rest)}>
+      <path d="M12 3 5 5.8v5.4c0 4.4 3 7.6 7 8.8 4-1.2 7-4.4 7-8.8V5.8z" />
+      <path d="m9.2 11.8 2 2 3.6-3.9" />
+    </svg>
+  );
+}
+
 /* --- Brand --- */
 
 export function BrandMark({

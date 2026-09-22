@@ -63,6 +63,10 @@ assert(
   contentBundle.includes('cl:extract-page-context-request'),
   'content bundle speaks the extraction protocol',
 );
+assert(
+  contentBundle.includes('cl:execute-action-request'),
+  'content bundle speaks the action execution protocol',
+);
 assert(!/fetch\(|XMLHttpRequest/.test(contentBundle), 'content bundle makes no network calls');
 
 // HTML pages reference assets that exist
@@ -189,7 +193,7 @@ const sender = { id: 'smoke-test-extension' };
 const ping = await listeners.onMessage({ v: 1, id: 's1', type: 'cl:ping' }, sender);
 assert(ping.ok === true, 'PING resolves ok');
 assert(ping.data?.pong === true, 'PING payload correct');
-assert(ping.data?.version === '0.2.0', 'PING reports version');
+assert(ping.data?.version === '0.3.0', 'PING reports version');
 
 const status = await listeners.onMessage(
   { v: 1, id: 's2', type: 'cl:get-extension-status' },
@@ -197,7 +201,7 @@ const status = await listeners.onMessage(
 );
 assert(status.ok === true, 'GET_EXTENSION_STATUS resolves ok');
 assert(status.data?.environment === 'extension', 'environment detected as extension');
-assert(status.data?.version === '0.2.0', 'status version matches manifest');
+assert(status.data?.version === '0.3.0', 'status version matches manifest');
 assert(status.data?.ai?.providerId === 'local-mock', 'status reports the local mock provider');
 assert(status.data?.ai?.gatewayConfigured === false, 'status reports no gateway configured');
 assert(!/key|secret|token/i.test(JSON.stringify(status.data?.ai ?? {})), 'AI status carries no secrets');
@@ -374,5 +378,178 @@ assert(
   emptyCommand.data?.errorCode === 'EMPTY_COMMAND',
   'empty command carries EMPTY_COMMAND code',
 );
+
+// --- Phase 4: Safe Action Engine -------------------------------------------
+// PREVIEW → PERMISSION → EXECUTE → VERIFY over the REAL built bundles.
+
+const actionPlan = await listeners.onMessage(
+  {
+    v: 1,
+    id: 's10',
+    type: 'cl:command-submit',
+    payload: { text: 'find "GitHub"', source: 'sidepanel' },
+  },
+  sender,
+);
+assert(actionPlan.ok === true, 'action command resolves ok');
+assert(actionPlan.data?.status === 'completed', 'action command completed');
+assert(!!actionPlan.data?.plan, 'action command produced a PLAN');
+assert(actionPlan.data?.execution === undefined, 'plan did NOT auto-execute');
+assert(actionPlan.data?.plan?.risk === 'READ_ONLY', 'find text risk is READ_ONLY');
+assert(actionPlan.data?.plan?.actions?.length === 1, 'plan has exactly one step');
+assert(
+  typeof actionPlan.data?.plan?.planHash === 'string' && actionPlan.data.plan.planHash.length > 0,
+  'plan carries its binding hash',
+);
+
+const badExecutePayload = await listeners.onMessage(
+  { v: 1, id: 's11', type: 'cl:action-execute', payload: { planId: 'x' } },
+  sender,
+);
+assert(badExecutePayload.ok === false, 'invalid ACTION_EXECUTE payload rejected');
+assert(
+  badExecutePayload.error?.code === 'INVALID_PAYLOAD',
+  'invalid ACTION_EXECUTE code correct',
+);
+
+const forgedExecute = await listeners.onMessage(
+  {
+    v: 1,
+    id: 's12',
+    type: 'cl:action-execute',
+    payload: {
+      planId: actionPlan.data.plan.planId,
+      planHash: 'forged-hash',
+      source: 'sidepanel',
+    },
+  },
+  sender,
+);
+assert(forgedExecute.ok === true, 'forged execute answered as a result');
+assert(forgedExecute.data?.status === 'failed', 'forged hash refused');
+assert(
+  forgedExecute.data?.errorCode === 'ACTION_PLAN_CHANGED',
+  'forged hash reports ACTION_PLAN_CHANGED',
+);
+
+const approvedExecute = await listeners.onMessage(
+  {
+    v: 1,
+    id: 's13',
+    type: 'cl:action-execute',
+    payload: {
+      planId: actionPlan.data.plan.planId,
+      planHash: actionPlan.data.plan.planHash,
+      source: 'sidepanel',
+    },
+  },
+  sender,
+);
+assert(approvedExecute.ok === true, 'approved execute resolves ok');
+assert(approvedExecute.data?.status === 'completed', 'approved plan executed');
+assert(approvedExecute.data?.execution?.status === 'completed', 'execution completed');
+assert(
+  approvedExecute.data?.execution?.steps?.[0]?.status === 'success',
+  'step verified successful',
+);
+assert(
+  (approvedExecute.data?.execution?.steps?.[0]?.data?.matchCount ?? 0) > 0,
+  'FIND_TEXT returned bounded matches from the real page',
+);
+
+const replayExecute = await listeners.onMessage(
+  {
+    v: 1,
+    id: 's14',
+    type: 'cl:action-execute',
+    payload: {
+      planId: actionPlan.data.plan.planId,
+      planHash: actionPlan.data.plan.planHash,
+      source: 'sidepanel',
+    },
+  },
+  sender,
+);
+assert(replayExecute.ok === true, 'replay answered as a result');
+assert(replayExecute.data?.status === 'failed', 'plan cannot replay (single-use)');
+assert(
+  replayExecute.data?.errorCode === 'ACTION_PLAN_UNKNOWN',
+  'replay reports ACTION_PLAN_UNKNOWN',
+);
+
+// Sensitive-field guard: an approved plan targeting a password field must
+// be BLOCKED at execution time, leaving the field untouched.
+const sensitivePlan = await listeners.onMessage(
+  {
+    v: 1,
+    id: 's15',
+    type: 'cl:command-submit',
+    payload: { text: 'type "hunter2" into the "Password" field', source: 'sidepanel' },
+  },
+  sender,
+);
+assert(sensitivePlan.ok === true, 'sensitive-target command planned');
+assert(
+  sensitivePlan.data?.plan?.actions?.[0]?.action?.type === 'TYPE_TEXT',
+  'planner proposed TYPE_TEXT',
+);
+
+const sensitiveExecute = await listeners.onMessage(
+  {
+    v: 1,
+    id: 's16',
+    type: 'cl:action-execute',
+    payload: {
+      planId: sensitivePlan.data.plan.planId,
+      planHash: sensitivePlan.data.plan.planHash,
+      source: 'sidepanel',
+    },
+  },
+  sender,
+);
+assert(sensitiveExecute.ok === true, 'sensitive execute answered as a result');
+assert(sensitiveExecute.data?.execution?.status === 'blocked', 'sensitive step BLOCKED');
+const sensitiveJson = JSON.stringify(sensitiveExecute.data ?? {});
+assert(!sensitiveJson.includes('hunter2'), 'typed value never appears in results');
+const passwordInput = dom.window.document.querySelector('input[type="password"]');
+assert(passwordInput?.value === '', 'password field left untouched');
+
+// Cancel path: withdrawing approval makes the plan unexecutable.
+const cancelPlan = await listeners.onMessage(
+  {
+    v: 1,
+    id: 's17',
+    type: 'cl:command-submit',
+    payload: { text: 'scroll down', source: 'sidepanel' },
+  },
+  sender,
+);
+assert(cancelPlan.data?.plan !== undefined, 'scroll plan created');
+const cancel = await listeners.onMessage(
+  {
+    v: 1,
+    id: 's18',
+    type: 'cl:action-cancel',
+    payload: { planId: cancelPlan.data.plan.planId },
+  },
+  sender,
+);
+assert(cancel.ok === true, 'ACTION_CANCEL resolves ok');
+assert(cancel.data?.cancelled === true, 'cancel acknowledged');
+const afterCancel = await listeners.onMessage(
+  {
+    v: 1,
+    id: 's19',
+    type: 'cl:action-execute',
+    payload: {
+      planId: cancelPlan.data.plan.planId,
+      planHash: cancelPlan.data.plan.planHash,
+      source: 'sidepanel',
+    },
+  },
+  sender,
+);
+assert(afterCancel.ok === true, 'post-cancel execute answered as a result');
+assert(afterCancel.data?.status === 'failed', 'cancelled plan cannot execute');
 
 console.log('\nWorker smoke test: all checks passed.');

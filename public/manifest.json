@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "CommandLayer",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "A premium, local-first command layer for the web. Think once. Execute everywhere.",
   "minimum_chrome_version": "116",
   "icons": {
@@ -16,8 +16,13 @@
   },
   "content_scripts": [
     {
-      "matches": ["http://*/*", "https://*/*"],
-      "js": ["content.js"],
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_idle",
       "all_frames": false
     }
@@ -43,5 +48,10 @@
       "description": "Open CommandLayer"
     }
   },
-  "permissions": ["commands", "sidePanel", "storage", "tabs"]
+  "permissions": [
+    "commands",
+    "sidePanel",
+    "storage",
+    "tabs"
+  ]
 }

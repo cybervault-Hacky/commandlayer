@@ -1,5 +1,7 @@
 import type { CommandResult } from '@/shared/types/command';
 import { AIResponseCard } from '@/shared/components/AIResponseCard';
+import { ActionPreviewCard } from '@/shared/components/ActionPreviewCard';
+import { ActionProgressCard } from '@/shared/components/ActionProgressCard';
 import { IconSparkle } from '@/shared/components/icons';
 
 export interface TranscriptUserTurn {
@@ -80,14 +82,31 @@ export function SessionTranscript({ entries, onClear }: SessionTranscriptProps) 
             ) : (
               <li key={entry.id} className="flex justify-start">
                 <div className="w-full max-w-[92%]">
-                  <AIResponseCard
-                    phase={entry.result.status === 'completed' ? 'completed' : 'failed'}
-                    result={entry.result}
-                    errorMessage={
-                      entry.result.status === 'failed' ? entry.result.text : null
-                    }
-                    hideClear
-                  />
+                  {entry.result.execution ? (
+                    /* Phase 4: executed plans render their verified
+                     * outcome inline (read-only). */
+                    <ActionProgressCard
+                      plan={entry.result.plan ?? null}
+                      execution={entry.result.execution}
+                    />
+                  ) : entry.result.plan ? (
+                    /* Proposed but not executed: read-only preview. */
+                    <ActionPreviewCard
+                      plan={entry.result.plan}
+                      onApprove={() => undefined}
+                      onCancel={() => undefined}
+                      readOnly
+                    />
+                  ) : (
+                    <AIResponseCard
+                      phase={entry.result.status === 'completed' ? 'completed' : 'failed'}
+                      result={entry.result}
+                      errorMessage={
+                        entry.result.status === 'failed' ? entry.result.text : null
+                      }
+                      hideClear
+                    />
+                  )}
                 </div>
               </li>
             ),

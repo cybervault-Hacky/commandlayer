@@ -31,18 +31,22 @@ import {
   sectionsForIntent,
 } from '@/page-intelligence/profiles';
 import { resolveIntent, intentForQuickAction } from '@/ai/intents';
+import { looksLikeActionRequest } from '@/actions/planner';
+import { PageSection } from '@/shared/types/page';
 import type {
   CommandSource,
   QuickActionId,
 } from '@/shared/types/command';
-import type { PageSection } from '@/shared/types/page';
 import type {
+  ActionCancelPayload,
+  ActionExecutePayload,
   MessageEnvelope,
   MessageResult,
 } from '@/shared/types/message';
 import { getExtensionStatus } from './status';
-import { getCurrentPage, getPageContext } from './pageContext';
+import { getCurrentPage, getPageContext, getActiveTabId } from './pageContext';
 import { openCommandCenterTab, openSidePanelForActiveTab } from './openers';
+import { executeApprovedPlan, cancelPlan } from './actionSession';
 
 const COMMAND_SOURCES: ReadonlySet<string> = new Set([
   'sidepanel',
@@ -120,6 +124,28 @@ function validateQuickActionPayload(
   return { actionId: payload.actionId, source: payload.source };
 }
 
+/**
+ * Phase 4 approval payload. Identity only — never a plan body. Even a
+ * compromised UI cannot inject a different plan this way.
+ */
+function validateActionExecutePayload(payload: unknown): ActionExecutePayload | null {
+  if (!isRecord(payload)) return null;
+  if (typeof payload.planId !== 'string' || payload.planId.length === 0) return null;
+  if (typeof payload.planHash !== 'string' || payload.planHash.length === 0) return null;
+  if (!isCommandSource(payload.source)) return null;
+  return {
+    planId: payload.planId,
+    planHash: payload.planHash,
+    source: payload.source,
+  };
+}
+
+function validateActionCancelPayload(payload: unknown): ActionCancelPayload | null {
+  if (!isRecord(payload)) return null;
+  if (typeof payload.planId !== 'string' || payload.planId.length === 0) return null;
+  return { planId: payload.planId };
+}
+
 const MAX_SECTION_REQUESTS = 7;
 
 function validateGetPageContextPayload(
@@ -190,21 +216,30 @@ async function dispatchMessage(message: MessageEnvelope): Promise<unknown> {
         );
       }
       // Every command is a user-initiated request → one on-demand capture
-      // of the active page. The capture is scoped to the sections the
-      // resolved intent actually needs (forms are never captured for AI).
+      // of the active page, scoped to what the command needs. Action-
+      // shaped commands use the planning profile (the same profile the
+      // executor re-captures for freshness checks); reasoning commands
+      // use the sections their intent needs. Forms are never captured
+      // for the AI pipeline.
+      const isActionRequest = looksLikeActionRequest(payload.text);
       const intent =
         payload.quickAction !== undefined
           ? intentForQuickAction(payload.quickAction) ??
             resolveIntent(payload.text)
           : resolveIntent(payload.text);
-      const context = await getPageContext({
-        sections: [...sectionsForIntent(intent)],
-      });
+      const sections = isActionRequest
+        ? ([PageSection.Metadata, PageSection.Headings, PageSection.Text] as const)
+        : sectionsForIntent(intent);
+      const [context, tabId] = await Promise.all([
+        getPageContext({ sections: [...sections] }),
+        getActiveTabId(),
+      ]);
       const request = buildCommandRequest({
         text: payload.text,
         source: payload.source,
         quickAction: payload.quickAction,
         context,
+        ...(tabId !== undefined ? { tabId } : {}),
       });
       return getCommandDispatcher().dispatch(request);
     }
@@ -234,6 +269,33 @@ async function dispatchMessage(message: MessageEnvelope): Promise<unknown> {
         context,
       );
       return getCommandDispatcher().dispatch(request);
+    }
+
+    case MessageType.ACTION_EXECUTE: {
+      const payload = validateActionExecutePayload(message.payload);
+      if (!payload) {
+        throw new CommandLayerError(
+          ErrorCode.INVALID_PAYLOAD,
+          USER_ERROR_MESSAGES[ErrorCode.INVALID_PAYLOAD],
+        );
+      }
+      return executeApprovedPlan({
+        planId: payload.planId,
+        planHash: payload.planHash,
+        source: payload.source,
+      });
+    }
+
+    case MessageType.ACTION_CANCEL: {
+      const payload = validateActionCancelPayload(message.payload);
+      if (!payload) {
+        throw new CommandLayerError(
+          ErrorCode.INVALID_PAYLOAD,
+          USER_ERROR_MESSAGES[ErrorCode.INVALID_PAYLOAD],
+        );
+      }
+      cancelPlan(payload.planId);
+      return { cancelled: true };
     }
 
     case MessageType.OPEN_COMMAND_CENTER: {

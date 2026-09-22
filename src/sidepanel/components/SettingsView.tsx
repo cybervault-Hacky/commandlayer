@@ -9,7 +9,7 @@ import {
 import { Segmented } from '@/shared/components/Segmented';
 import { StatusDot } from '@/shared/components/StatusDot';
 import { Toggle } from '@/shared/components/Toggle';
-import { IconChevronLeft, IconShield, IconSparkle } from '@/shared/components/icons';
+import { IconChevronLeft, IconShield, IconShieldCheck, IconSparkle } from '@/shared/components/icons';
 
 const THEME_OPTIONS: readonly { value: ThemeType; label: string }[] = [
   { value: Theme.Dark, label: 'Dark' },
@@ -96,11 +96,33 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
               <p className="text-[11.5px] leading-4.5 text-text-secondary">
                 CommandLayer never stores provider API keys or secrets. A
                 gateway connection needs only its URL; credentials stay
-                server-side. Reasoning is read-only — it can understand a
-                page, never act on it.
+                server-side. AI reasoning never performs actions — it can
+                understand a page, never act on it.
               </p>
             </div>
           </div>
+        </section>
+
+        <section className="cl-card p-4" aria-labelledby="settings-actions">
+          <h2 id="settings-actions" className="section-label">
+            Actions &amp; safety
+          </h2>
+          <div className="mt-3 flex items-start gap-2.5">
+            <IconShieldCheck size={15} className="mt-0.5 shrink-0 text-accent" />
+            <p className="text-[11.5px] leading-4.5 text-text-secondary">
+              Actions come from a fixed, typed allowlist — read page,
+              find text, scroll, click, type, select. They never run on
+              request: each plan is previewed, requires your explicit
+              approval, expires quickly, and works exactly once.
+            </p>
+          </div>
+          <ul className="mt-3 space-y-1.5 text-[11px] leading-4 text-text-muted">
+            <li>• No “allow everything” mode exists or can be enabled.</li>
+            <li>• Sensitive fields (passwords, payments, codes, keys) are always blocked.</li>
+            <li>• Buying, deleting, sending, and downloads are not supported.</li>
+            <li>• Free text like “yes” or “do it” never grants permission.</li>
+            <li>• If a plan fails or the page changes, execution stops — you decide next.</li>
+          </ul>
         </section>
 
         <section className="cl-card p-4" aria-labelledby="settings-shortcut">

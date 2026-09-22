@@ -8,6 +8,7 @@ import {
 } from '@/test-utils/chromeStub';
 import { handleContentMessage } from '@/content/contentScript';
 import type { ExtractPageResponse } from '@/page-intelligence/protocol';
+import type { ContentActionResponse } from '@/actions/types';
 import { getPageContext } from '../pageContext';
 
 const GITHUB = { id: 1, title: 'GitHub', url: 'https://github.com/' };
@@ -34,7 +35,7 @@ function wireRealContentScript(stub: ChromeStub, html: string, url: string): voi
   // The content script reads the global `document` — point it at the fixture.
   vi.stubGlobal('document', dom.window.document);
   stub.tabs.sendMessage.mockImplementation(async (_tabId: number, message: unknown) => {
-    let response: ExtractPageResponse | undefined;
+    let response: ExtractPageResponse | ContentActionResponse | undefined;
     handleContentMessage(message, (r) => {
       response = r;
     });

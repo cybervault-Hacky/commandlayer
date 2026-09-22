@@ -1,5 +1,5 @@
 /**
- * Phase 3 — command pipeline dispatcher.
+ * Command pipeline dispatcher (Phase 3 reasoning + Phase 4 actions).
  *
  *   Quick Action / Command Input
  *            ↓
@@ -7,12 +7,16 @@
  *            ↓
  *      CommandDispatcher (per-source cancellation)
  *            ↓
- *      CommandHandler (AICommandHandler → reasoning engine)
+ *      CommandHandler (AICommandHandler)
+ *            ├─ deterministic action planner → ActionPlan (preview,
+ *            │   explicit approval required — nothing executes here)
+ *            └─ reasoning engine → validated AIResponse
  *            ↓
- *      CommandResult (validated AI response or typed error)
+ *      CommandResult (validated data or typed error)
  *
- * Reasoning-only: the handler never performs browser actions. Every
- * result is either a validated AIResponse or a user-safe typed error.
+ * Safety: the planner's output is stored in the background session
+ * store and only ever executes through ACTION_EXECUTE (plan-hash bound,
+ * single-use approval). There is no execution path in this module.
  */
 import {
   ErrorCode,
@@ -29,6 +33,11 @@ import {
   type AIIntent,
   type AIResponse,
 } from '@/ai/types';
+import { planAction, looksLikeActionRequest } from '@/actions/planner';
+import { actionSessionStore } from '@/actions/session';
+import { actionRegistry } from '@/actions/registry';
+import { pageContentDigest } from '@/page-intelligence/hash';
+import type { ActionPlan } from '@/actions/types';
 import {
   isCommandSource,
   type CommandRequest,
@@ -38,16 +47,18 @@ import {
 
 export type HandlerResult =
   | { kind: 'success'; response: AIResponse }
-  | { kind: 'error'; error: AIError; intent?: AIIntent };
+  | { kind: 'error'; error: AIError; intent?: AIIntent }
+  | { kind: 'plan'; plan: ActionPlan };
 
 export interface CommandHandler {
   handle(request: CommandRequest, signal: AbortSignal): Promise<HandlerResult>;
 }
 
 /**
- * Routes every command through the AI reasoning engine. Quick actions
- * use their explicit intent; free text is classified deterministically
- * (keyword rules, ANSWER fallback). No model-based classification.
+ * Routes every command: quick actions keep their explicit reasoning
+ * intent; free text first passes the deterministic action planner, then
+ * falls through to the reasoning engine (keyword rules, ANSWER
+ * fallback). No model-based classification anywhere.
  */
 export class AICommandHandler implements CommandHandler {
   async handle(
@@ -55,12 +66,56 @@ export class AICommandHandler implements CommandHandler {
     signal: AbortSignal,
   ): Promise<HandlerResult> {
     const text = request.text.trim();
-    const intent: AIIntent =
-      request.quickAction !== undefined
-        ? intentForQuickAction(request.quickAction) ??
-          resolveIntent(text)
-        : resolveIntent(text);
 
+    if (request.quickAction !== undefined) {
+      const intent =
+        intentForQuickAction(request.quickAction) ?? resolveIntent(text);
+      return this.reason(request, text, intent, signal);
+    }
+
+    // Phase 4: explicit action phrasings produce a PLAN, never direct
+    // execution. Planning requires a real page context to bind to.
+    if (looksLikeActionRequest(text)) {
+      const planResult = this.plan(request, text);
+      if (planResult !== null) return planResult;
+      // Not plannable (e.g. no page bound) → fall through to reasoning.
+    }
+
+    return this.reason(request, text, resolveIntent(text), signal);
+  }
+
+  private plan(
+    request: CommandRequest,
+    text: string,
+  ): HandlerResult | null {
+    if (request.context === null || request.tabId === undefined) {
+      return null;
+    }
+    const context = request.context;
+    if (context.state !== 'ready' && context.state !== 'partial') {
+      return null;
+    }
+    const outcome = planAction(text, {
+      requestId: request.id,
+      tabId: request.tabId,
+      url: context.url ?? '',
+      contentHash: pageContentDigest(context),
+    });
+    if (outcome.plan) {
+      // The plan lives in the background session store; execution needs
+      // a separate explicit approval bound to this exact hash.
+      actionSessionStore.addPlan(outcome.plan);
+      return { kind: 'plan', plan: outcome.plan };
+    }
+    return null;
+  }
+
+  private async reason(
+    request: CommandRequest,
+    text: string,
+    intent: AIIntent,
+    signal: AbortSignal,
+  ): Promise<HandlerResult> {
     if (request.context === null) {
       return {
         kind: 'error',
@@ -139,6 +194,15 @@ function validateCommandRequest(
   return null;
 }
 
+function planSummary(plan: ActionPlan): string {
+  const count = plan.actions.length;
+  const first = plan.actions[0];
+  if (count === 1 && first) {
+    return `Proposed action: ${first.preview}`;
+  }
+  return `Proposed ${count} actions — review before allowing.`;
+}
+
 export class CommandDispatcher {
   /** Per-source in-flight request; a new dispatch cancels the old one. */
   private readonly inFlight = new Map<CommandSource, AbortController>();
@@ -193,6 +257,21 @@ export class CommandDispatcher {
         };
       }
 
+      if (output.kind === 'plan') {
+        // A proposal is a successful COMMAND, not an execution: nothing
+        // runs until the user approves the exact stored plan.
+        return {
+          id: request.id,
+          status: 'completed',
+          text: planSummary(output.plan),
+          ...base,
+          plan: output.plan,
+          retryable: false,
+          startedAt,
+          finishedAt,
+        };
+      }
+
       return {
         id: request.id,
         status: 'completed',
@@ -220,5 +299,19 @@ export class CommandDispatcher {
         this.inFlight.delete(request.source);
       }
     }
+  }
+}
+
+/** Risk label helper reused by the UI (single source of truth). */
+export function riskLabel(risk: string): string {
+  switch (risk) {
+    case 'READ_ONLY':
+      return 'Read-only';
+    case 'LOW_RISK':
+      return 'Low risk';
+    case 'CONFIRMATION_REQUIRED':
+      return 'Requires confirmation';
+    default:
+      return actionRegistry.isRegistered(risk) ? 'Requires confirmation' : 'Unknown';
   }
 }

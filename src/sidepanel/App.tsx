@@ -5,6 +5,7 @@ import {
 } from '@/shared/constants/app';
 import { CommandSource } from '@/shared/types/command';
 import type { QuickAction } from '@/shared/constants/quickActions';
+import type { ActionPlan } from '@/actions/types';
 import {
   useCommandPipeline,
 } from '@/shared/hooks/useCommandPipeline';
@@ -13,6 +14,8 @@ import { usePageIntelligence } from '@/shared/hooks/usePageIntelligence';
 import { useSettings } from '@/shared/hooks/useSettings';
 import { BrandMark, IconSettings } from '@/shared/components/icons';
 import { AIResponseCard } from '@/shared/components/AIResponseCard';
+import { ActionPreviewCard } from '@/shared/components/ActionPreviewCard';
+import { ActionProgressCard } from '@/shared/components/ActionProgressCard';
 import { CommandInput } from '@/shared/components/CommandInput';
 import { CurrentPageCard } from '@/shared/components/CurrentPageCard';
 import { PageInsightCard } from '@/shared/components/PageInsightCard';
@@ -23,10 +26,14 @@ import { FirstRunTip } from './components/FirstRunTip';
 type PanelView = 'home' | 'settings';
 
 /**
- * Phase 3: the Side Panel is the CommandLayer intelligence interface.
+ * Phase 4: the Side Panel is the CommandLayer intelligence + safe action
+ * interface.
  *
- * Hero → ask box → quick actions → AI response → current page insight.
- * Reasoning only: nothing here performs browser actions.
+ * Hero → command box → quick actions → [reasoning response | action
+ * preview | execution progress] → current page insight.
+ *
+ * Every action follows PREVIEW → PERMISSION → EXECUTE → VERIFY: nothing
+ * runs from a plain command, and approval is an explicit button press.
  */
 export function App() {
   const { settings, update } = useSettings();
@@ -34,24 +41,59 @@ export function App() {
   const { insight, capturing, capture } = usePageIntelligence(context);
   const [view, setView] = useState<PanelView>('home');
   const [draft, setDraft] = useState('');
+  /** The plan currently being executed (preview → progress binding). */
+  const [executingPlan, setExecutingPlan] = useState<ActionPlan | null>(null);
 
   // Successful free-text commands clear the draft.
   const pipeline = useCommandPipeline(CommandSource.SidePanel, (result) => {
-    if (result.status === 'completed') setDraft('');
+    if (result.status === 'completed' && !result.execution) setDraft('');
   });
 
   const processing = pipeline.phase === 'processing';
+  const result = pipeline.result;
 
   const handleSubmit = useCallback(() => {
+    setExecutingPlan(null);
     void pipeline.submitText(draft);
   }, [pipeline, draft]);
 
   const handleQuickAction = useCallback(
     (action: QuickAction) => {
+      setExecutingPlan(null);
       void pipeline.submitQuickAction(action.id);
     },
     [pipeline],
   );
+
+  const handleApprove = useCallback(
+    (plan: ActionPlan) => {
+      setExecutingPlan(plan);
+      void pipeline.executePlan(plan);
+    },
+    [pipeline],
+  );
+
+  const handleCancelPlan = useCallback(
+    (plan: ActionPlan) => {
+      setExecutingPlan(null);
+      void pipeline.cancelPlan(plan.planId);
+    },
+    [pipeline],
+  );
+
+  const handleClear = useCallback(() => {
+    setExecutingPlan(null);
+    pipeline.reset();
+  }, [pipeline]);
+
+  // Which card owns the command slot?
+  const execution = result?.execution ?? null;
+  const previewPlan =
+    result?.plan && !execution && pipeline.phase !== 'processing'
+      ? result.plan
+      : null;
+  const runningPlan = processing && executingPlan ? executingPlan : null;
+  const showReasoningCard = !execution && !previewPlan && !runningPlan;
 
   return (
     <div className="cl-app h-full overflow-y-auto">
@@ -80,13 +122,13 @@ export function App() {
                 Ask about this page.
                 <br />
                 <span className="text-text-secondary">
-                  Get real intelligence.
+                  Request safe actions.
                 </span>
               </h1>
               <p className="mt-1.5 text-[11.5px] leading-4 text-text-muted">
-                Summaries, analysis and answers from the page you are
-                viewing. Reasoning only — CommandLayer never acts on the
-                page for you.
+                Intelligence about the page you are viewing — plus safe,
+                bounded actions. Every action is previewed first and runs
+                only after your explicit approval.
               </p>
             </section>
 
@@ -96,15 +138,45 @@ export function App() {
                 onChange={setDraft}
                 onSubmit={handleSubmit}
                 loading={processing}
-                placeholder="What do you want to know?"
+                placeholder="Ask, or say “find …”, “scroll …”, “click …”"
               />
-              <AIResponseCard
-                phase={pipeline.phase}
-                result={pipeline.result}
-                errorMessage={pipeline.errorMessage}
-                onRetry={() => void pipeline.retry()}
-                onClear={pipeline.reset}
-              />
+
+              {runningPlan && (
+                <ActionProgressCard
+                  plan={runningPlan}
+                  execution={null}
+                  running
+                />
+              )}
+
+              {execution && (
+                <ActionProgressCard
+                  plan={
+                    executingPlan && executingPlan.planId === execution.planId
+                      ? executingPlan
+                      : null
+                  }
+                  execution={execution}
+                />
+              )}
+
+              {previewPlan && (
+                <ActionPreviewCard
+                  plan={previewPlan}
+                  onApprove={() => handleApprove(previewPlan)}
+                  onCancel={() => handleCancelPlan(previewPlan)}
+                />
+              )}
+
+              {showReasoningCard && (
+                <AIResponseCard
+                  phase={pipeline.phase}
+                  result={result}
+                  errorMessage={pipeline.errorMessage}
+                  onRetry={() => void pipeline.retry()}
+                  onClear={handleClear}
+                />
+              )}
             </section>
 
             <section className="cl-enter mt-4" style={{ animationDelay: '120ms' }}>

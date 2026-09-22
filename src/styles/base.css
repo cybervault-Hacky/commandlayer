@@ -396,6 +396,69 @@ body {
   animation: cl-shimmer 1.4s ease-in-out infinite;
 }
 
+/* -------------------------------------------------------------------------
+ * Phase 4 — Safe Action Engine cards
+ * ---------------------------------------------------------------------- */
+.cl-action-card {
+  background: var(--cl-surface);
+  border: 1px solid var(--cl-border);
+  border-radius: var(--cl-radius-md);
+  box-shadow: var(--cl-shadow-card);
+  padding: 14px;
+}
+.cl-action-card + .cl-action-card,
+.cl-action-card ~ .cl-action-card {
+  margin-top: 10px;
+}
+
+/* Risk badges — color is semantic, never configurable by content or AI. */
+.cl-risk-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.cl-risk-readonly {
+  background: color-mix(in srgb, var(--cl-success) 14%, transparent);
+  color: var(--cl-success);
+}
+.cl-risk-low {
+  background: color-mix(in srgb, var(--cl-accent) 14%, transparent);
+  color: var(--cl-accent);
+}
+.cl-risk-confirm {
+  background: color-mix(in srgb, var(--cl-warning) 16%, transparent);
+  color: var(--cl-warning);
+}
+
+/* Step status colors (✓ ● ○ semantics). */
+.cl-step-success {
+  color: var(--cl-success);
+}
+.cl-step-failed {
+  color: var(--cl-error);
+}
+.cl-step-blocked {
+  color: var(--cl-warning);
+}
+.cl-step-stale {
+  color: var(--cl-warning);
+}
+.cl-step-cancelled,
+.cl-step-skipped {
+  color: var(--cl-text-muted);
+}
+.cl-step-pending {
+  color: var(--cl-text-muted);
+}
+.cl-step-running {
+  color: var(--cl-accent);
+}
+
 /* Reduced motion: honored from the OS preference and from the user setting
  * (html[data-motion='reduced'], applied by the settings layer). */
 @media (prefers-reduced-motion: reduce) {
