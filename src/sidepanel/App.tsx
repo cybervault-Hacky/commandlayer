@@ -24,17 +24,21 @@ import { PageInsightCard } from '@/shared/components/PageInsightCard';
 import { QuickActions } from '@/shared/components/QuickActions';
 import { WorkflowPreviewCard } from '@/shared/components/WorkflowPreviewCard';
 import { WorkflowProgressCard } from '@/shared/components/WorkflowProgressCard';
+import { MemoryPreviewCard } from '@/shared/components/MemoryPreviewCard';
+import { MemoryResultCard } from '@/shared/components/MemoryResultCard';
 import { SettingsView } from './components/SettingsView';
+import { MemoryView } from './components/MemoryView';
 import { FirstRunTip } from './components/FirstRunTip';
 
-type PanelView = 'home' | 'settings';
+type PanelView = 'home' | 'settings' | 'memory';
 
 /**
  * Phase 4: the Side Panel is the CommandLayer intelligence + safe action
  * interface.
  *
  * Hero → command box → quick actions → [reasoning response | action
- * preview | execution progress] → current page insight.
+ * preview | execution progress | memory confirmation] → current page
+ * insight. Settings hosts the Phase 6 memory manager.
  *
  * Every action follows PREVIEW → PERMISSION → EXECUTE → VERIFY: nothing
  * runs from a plain command, and approval is an explicit button press.
@@ -106,8 +110,17 @@ export function App() {
       : null;
   const runningPlan = processing && executingPlan ? executingPlan : null;
   const activeWorkflow = workflow.workflow;
+  // Phase 6 — a memory change is never applied from a command: it waits
+  // for an explicit confirmation here.
+  const memoryPreview = result?.memory ?? null;
+  const memoryResult = result?.memoryResult ?? null;
   const showReasoningCard =
-    !activeWorkflow && !execution && !previewPlan && !runningPlan;
+    !activeWorkflow &&
+    !execution &&
+    !previewPlan &&
+    !runningPlan &&
+    !memoryPreview &&
+    !memoryResult;
 
   return (
     <div className="cl-app h-full overflow-y-auto">
@@ -198,6 +211,22 @@ export function App() {
                 />
               )}
 
+              {memoryPreview && (
+                <MemoryPreviewCard
+                  preview={memoryPreview}
+                  onConfirm={() => {
+                    void pipeline.confirmMemory(memoryPreview.previewId);
+                  }}
+                  onCancel={() => {
+                    pipeline.cancelMemory(memoryPreview.previewId);
+                  }}
+                />
+              )}
+
+              {!memoryPreview && memoryResult && (
+                <MemoryResultCard result={memoryResult} onDismiss={handleClear} />
+              )}
+
               {previewPlan && (
                 <ActionPreviewCard
                   plan={previewPlan}
@@ -263,7 +292,14 @@ export function App() {
             </footer>
           </>
         ) : (
-          <SettingsView onBack={() => setView('home')} />
+          view === 'settings' ? (
+            <SettingsView
+              onBack={() => setView('home')}
+              onOpenMemory={() => setView('memory')}
+            />
+          ) : (
+            <MemoryView onBack={() => setView('settings')} />
+          )
         )}
       </div>
     </div>

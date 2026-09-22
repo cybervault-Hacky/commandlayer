@@ -20,6 +20,8 @@ import {
   toUserFacingError,
 } from '@/shared/security/errors';
 import { validateSettingsPatch } from '@/shared/validation/settings';
+import { isMemoryKind } from '@/memory/types';
+import { MEMORY_LIMITS } from '@/memory/limits';
 import { getCommandDispatcher } from '@/commands';
 import {
   buildCommandRequest,
@@ -47,10 +49,24 @@ import type {
   WorkflowIdPayload,
   WorkflowResumePayload,
 } from '@/shared/types/message';
+import type {
+  MemoryCancelPayload,
+  MemoryConfirmPayload,
+  MemoryDeletePayload,
+  MemoryListPayload,
+} from '@/shared/types/message';
 import { getExtensionStatus } from './status';
 import { getCurrentPage, getPageContext, getActiveTabId } from './pageContext';
 import { openCommandCenterTab, openSidePanelForActiveTab } from './openers';
 import { executeApprovedPlan, cancelPlan } from './actionSession';
+import {
+  cancelMemoryCommand,
+  clearAllMemoryCommand,
+  confirmMemoryCommand,
+  deleteMemoryCommand,
+  listMemoriesCommand,
+  memoryStatusCommand,
+} from './memorySession';
 import {
   approveWorkflowCommand,
   cancelWorkflowCommand,
@@ -218,6 +234,63 @@ function validateWorkflowIdPayload(payload: unknown): WorkflowIdPayload | null {
     return null;
   }
   return { workflowId: payload.workflowId };
+}
+
+/**
+ * Phase 6 — memory payloads.
+ *
+ * Confirmation carries an id only. Deletions must carry `confirm: true`
+ * explicitly, so no stray or duplicated message can remove stored memory.
+ */
+function validateMemoryConfirmPayload(payload: unknown): MemoryConfirmPayload | null {
+  if (!isRecord(payload)) return null;
+  if (typeof payload.previewId !== 'string' || payload.previewId.length === 0) {
+    return null;
+  }
+  if (payload.previewId.length > 128) return null;
+  if (!isCommandSource(payload.source)) return null;
+  return { previewId: payload.previewId, source: payload.source };
+}
+
+function validateMemoryCancelPayload(payload: unknown): MemoryCancelPayload | null {
+  if (!isRecord(payload)) return null;
+  if (typeof payload.previewId !== 'string' || payload.previewId.length === 0) {
+    return null;
+  }
+  if (payload.previewId.length > 128) return null;
+  return { previewId: payload.previewId };
+}
+
+function validateMemoryListPayload(payload: unknown): MemoryListPayload | null {
+  if (payload === undefined) return {};
+  if (!isRecord(payload)) return null;
+  const out: MemoryListPayload = {};
+  if (payload.query !== undefined) {
+    if (typeof payload.query !== 'string') return null;
+    if (payload.query.length > MEMORY_LIMITS.MAX_MEMORY_COMMAND_LENGTH) return null;
+    out.query = payload.query;
+  }
+  if (payload.kind !== undefined) {
+    if (!isMemoryKind(payload.kind)) return null;
+    out.kind = payload.kind;
+  }
+  return out;
+}
+
+function validateMemoryDeletePayload(payload: unknown): MemoryDeletePayload | null {
+  if (!isRecord(payload)) return null;
+  if (typeof payload.memoryId !== 'string' || payload.memoryId.length === 0) {
+    return null;
+  }
+  if (payload.memoryId.length > 128) return null;
+  if (payload.confirm !== true) return null;
+  return { memoryId: payload.memoryId, confirm: true };
+}
+
+function validateMemoryClearAllPayload(payload: unknown): { confirm: true } | null {
+  if (!isRecord(payload)) return null;
+  if (payload.confirm !== true) return null;
+  return { confirm: true };
 }
 
 const MAX_SECTION_REQUESTS = 7;
@@ -461,6 +534,68 @@ async function dispatchMessage(message: MessageEnvelope): Promise<unknown> {
       }
       cancelPlan(payload.planId);
       return { cancelled: true };
+    }
+
+    case MessageType.MEMORY_STATUS: {
+      requireNoPayload(message);
+      return memoryStatusCommand();
+    }
+
+    case MessageType.MEMORY_LIST: {
+      const payload = validateMemoryListPayload(message.payload);
+      if (!payload) {
+        throw new CommandLayerError(
+          ErrorCode.INVALID_PAYLOAD,
+          USER_ERROR_MESSAGES[ErrorCode.INVALID_PAYLOAD],
+        );
+      }
+      return listMemoriesCommand(payload);
+    }
+
+    case MessageType.MEMORY_CONFIRM: {
+      const payload = validateMemoryConfirmPayload(message.payload);
+      if (!payload) {
+        throw new CommandLayerError(
+          ErrorCode.INVALID_PAYLOAD,
+          USER_ERROR_MESSAGES[ErrorCode.INVALID_PAYLOAD],
+        );
+      }
+      // The ONLY path that stores or deletes memory from a proposal: the
+      // background re-validates the policy and the limits at commit time.
+      return confirmMemoryCommand(payload);
+    }
+
+    case MessageType.MEMORY_CANCEL: {
+      const payload = validateMemoryCancelPayload(message.payload);
+      if (!payload) {
+        throw new CommandLayerError(
+          ErrorCode.INVALID_PAYLOAD,
+          USER_ERROR_MESSAGES[ErrorCode.INVALID_PAYLOAD],
+        );
+      }
+      return cancelMemoryCommand(payload.previewId);
+    }
+
+    case MessageType.MEMORY_DELETE: {
+      const payload = validateMemoryDeletePayload(message.payload);
+      if (!payload) {
+        throw new CommandLayerError(
+          ErrorCode.INVALID_PAYLOAD,
+          USER_ERROR_MESSAGES[ErrorCode.INVALID_PAYLOAD],
+        );
+      }
+      return deleteMemoryCommand(payload.memoryId);
+    }
+
+    case MessageType.MEMORY_CLEAR_ALL: {
+      const payload = validateMemoryClearAllPayload(message.payload);
+      if (!payload) {
+        throw new CommandLayerError(
+          ErrorCode.INVALID_PAYLOAD,
+          USER_ERROR_MESSAGES[ErrorCode.INVALID_PAYLOAD],
+        );
+      }
+      return clearAllMemoryCommand();
     }
 
     case MessageType.OPEN_COMMAND_CENTER: {

@@ -52,10 +52,28 @@ import {
   type CommandResult,
   type CommandSource,
 } from '@/shared/types/command';
+import { parseMemoryCommand } from '@/memory/parser';
+import { memoryController } from '@/memory/controller';
+import {
+  MemoryPreviewAction,
+  MemoryResultAction,
+  toAISavedMemories,
+  type MemoryPreviewView,
+  type MemoryResultView,
+  type MemoryUsedView,
+} from '@/memory/types';
 
 export type HandlerResult =
-  | { kind: 'success'; response: AIResponse }
+  | {
+      kind: 'success';
+      response: AIResponse;
+      /** Phase 6 — saved memories that informed this answer (bounded). */
+      memoriesUsed?: MemoryUsedView[];
+    }
   | { kind: 'error'; error: AIError; intent?: AIIntent }
+  | { kind: 'memory'; preview: MemoryPreviewView }
+  | { kind: 'memoryResult'; result: MemoryResultView }
+  | { kind: 'memoryFailure'; code: string; message: string }
   | { kind: 'plan'; plan: ActionPlan }
   | {
       kind: 'workflow';
@@ -86,6 +104,14 @@ export class AICommandHandler implements CommandHandler {
         intentForQuickAction(request.quickAction) ?? resolveIntent(text);
       return this.reason(request, text, intent, signal);
     }
+
+    // Phase 6: explicit memory phrasing ("remember …", "forget …", "what do
+    // you remember …") is handled by the deterministic memory path before
+    // any planning or reasoning — a memory command is never turned into an
+    // action, a workflow, or a prompt. Nothing is stored here: the reply is
+    // a confirmation preview (or a bounded listing).
+    const memory = await this.handleMemory(text);
+    if (memory !== null) return memory;
 
     // Phase 5: a multi-clause goal is planned as a bounded WORKFLOW
     // before any single-action planning, so a multi-step request is never
@@ -202,6 +228,30 @@ export class AICommandHandler implements CommandHandler {
     };
   }
 
+  /**
+   * Phase 6 — the memory path. Purely deterministic: parse → controller.
+   * The controller never writes from a command; it returns a preview that
+   * only a user confirmation can commit.
+   */
+  private async handleMemory(text: string): Promise<HandlerResult | null> {
+    const parsed = parseMemoryCommand(text);
+    if (!parsed) return null;
+
+    const outcome = await memoryController.handleCommand(parsed);
+    switch (outcome.kind) {
+      case 'preview':
+        return { kind: 'memory', preview: outcome.preview };
+      case 'result':
+        return { kind: 'memoryResult', result: outcome.result };
+      default:
+        return {
+          kind: 'memoryFailure',
+          code: outcome.code,
+          message: outcome.message,
+        };
+    }
+  }
+
   private async reason(
     request: CommandRequest,
     text: string,
@@ -225,18 +275,32 @@ export class AICommandHandler implements CommandHandler {
       };
     }
 
+    // Phase 6: retrieval is gated by the memory switch, relevance-bound,
+    // and capped (never the whole store). Nothing is retrieved when the
+    // request shares no topic with any saved memory.
+    const retrieval = await memoryController.retrieve(text);
+
     const result = await runAIRequest({
       requestId: request.id,
       intent,
       userPrompt: text,
       context,
       signal,
+      ...(retrieval.memories.length > 0
+        ? { memory: toAISavedMemories(retrieval) }
+        : {}),
     });
 
     if (!result.ok) {
       return { kind: 'error', error: result.error, intent };
     }
-    return { kind: 'success', response: result.response };
+    return {
+      kind: 'success',
+      response: result.response,
+      ...(retrieval.memories.length > 0
+        ? { memoriesUsed: retrieval.memories }
+        : {}),
+    };
   }
 }
 
@@ -284,6 +348,18 @@ function validateCommandRequest(
     };
   }
   return null;
+}
+
+/** One-line, user-safe summary of what a confirmation would do. */
+function memoryPreviewSummary(preview: MemoryPreviewView): string {
+  switch (preview.action) {
+    case MemoryPreviewAction.Update:
+      return 'This looks like something you already saved — review the update.';
+    case MemoryPreviewAction.Delete:
+      return 'Review this before I forget it.';
+    default:
+      return 'Review this before I save it.';
+  }
 }
 
 function planSummary(plan: ActionPlan): string {
@@ -344,6 +420,58 @@ export class CommandDispatcher {
           ...(output.intent ? { intent: output.intent } : {}),
           errorCode: output.error.code,
           retryable: output.error.retryable,
+          startedAt,
+          finishedAt,
+        };
+      }
+
+      if (output.kind === 'memory') {
+        // Phase 6: a memory change is a PROPOSAL, never a write. The body
+        // stays in the background; confirming sends only the preview id.
+        return {
+          id: request.id,
+          status: 'completed',
+          text: memoryPreviewSummary(output.preview),
+          ...base,
+          memory: output.preview,
+          retryable: false,
+          startedAt,
+          finishedAt,
+        };
+      }
+
+      if (output.kind === 'memoryResult') {
+        return {
+          id: request.id,
+          status: 'completed',
+          text: output.result.message,
+          ...base,
+          memoryResult: output.result,
+          retryable: false,
+          startedAt,
+          finishedAt,
+        };
+      }
+
+      if (output.kind === 'memoryFailure') {
+        // A refused memory (sensitive content, limit, memory off) is a
+        // typed failure that still renders as a memory outcome — never as
+        // an AI error, and never with the refused text echoed back.
+        return {
+          id: request.id,
+          status: 'failed',
+          text: output.message,
+          ...base,
+          memoryResult: {
+            action: output.code === 'MEMORY_DISABLED'
+              ? MemoryResultAction.Disabled
+              : MemoryResultAction.Blocked,
+            message: output.message,
+            records: [],
+            total: 0,
+          },
+          errorCode: output.code,
+          retryable: false,
           startedAt,
           finishedAt,
         };
@@ -424,6 +552,9 @@ export class CommandDispatcher {
         ...base,
         intent: output.response.intent,
         ai: output.response,
+        ...(output.memoriesUsed && output.memoriesUsed.length > 0
+          ? { memoriesUsed: output.memoriesUsed }
+          : {}),
         retryable: false,
         startedAt,
         finishedAt,

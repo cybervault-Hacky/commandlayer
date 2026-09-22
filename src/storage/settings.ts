@@ -13,6 +13,7 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
   theme: Theme.Dark,
   reduceMotion: false,
   onboardingSeen: false,
+  memoryEnabled: true,
 });
 
 /** Read settings, recovering gracefully from missing or corrupted data. */

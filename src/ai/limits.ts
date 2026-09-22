@@ -18,6 +18,10 @@ export const AI_LIMITS = {
   MAX_CONTEXT_TABLE_ROWS: 15,
   MAX_CONTEXT_SELECTED: 1000,
 
+  // Phase 6 — saved memory attached to one request (hard bounds)
+  MAX_REQUEST_MEMORIES: 4,
+  MAX_MEMORY_CHARS: 240,
+
   // Serialized payload budget (hard cap before the request leaves the client)
   MAX_SERIALIZE_CHARS: 60000,
 

@@ -31,6 +31,10 @@ import {
  * Phase 3: a session-only reasoning transcript. User questions and the
  * validated AI answers accumulate here for the lifetime of the tab —
  * nothing is persisted anywhere.
+ *
+ * Phase 6: memory requests appear in the transcript too ("Memory saved.")
+ * and stay interactive while a confirmation is pending. The transcript is
+ * still session-only; saved memories live in Settings → Memory.
  */
 export function App() {
   const { context, loading: pageLoading, refresh } = usePageContext();
@@ -121,6 +125,9 @@ export function App() {
           <SessionTranscript
             entries={transcript}
             onClear={() => setTranscript([])}
+            liveMemoryEntryId={pipeline.result?.memory ? pipeline.result.id : null}
+            onMemoryConfirm={(previewId) => void pipeline.confirmMemory(previewId)}
+            onMemoryCancel={(previewId) => pipeline.cancelMemory(previewId)}
           />
         </section>
 

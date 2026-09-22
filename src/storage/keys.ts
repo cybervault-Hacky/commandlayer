@@ -4,6 +4,12 @@
  */
 export const STORAGE_KEYS = {
   settings: 'commandlayer.settings.v1',
+  /**
+   * Phase 6 — persistent personal memory. Written ONLY by
+   * @/memory/storage (the single mutation path); everything else reads it
+   * through the memory repository.
+   */
+  memory: 'commandlayer.memory.v1',
 } as const;
 
 export const PREFERENCE_KEY_PREFIX = 'commandlayer.pref.';

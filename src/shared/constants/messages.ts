@@ -33,6 +33,19 @@ export const MessageType = {
   WORKFLOW_RESUME: 'cl:workflow-resume',
   WORKFLOW_CANCEL: 'cl:workflow-cancel',
   WORKFLOW_STATUS: 'cl:workflow-status',
+  /**
+   * Phase 6 — persistent personal memory. Commands ("remember …") travel
+   * through COMMAND_SUBMIT like any other request; these messages carry the
+   * confirmation decision and the management-UI operations.
+   * MEMORY_CONFIRM carries ONLY a preview id — never the memory body, which
+   * lives in the background and is re-validated at commit time.
+   */
+  MEMORY_STATUS: 'cl:memory-status',
+  MEMORY_LIST: 'cl:memory-list',
+  MEMORY_CONFIRM: 'cl:memory-confirm',
+  MEMORY_CANCEL: 'cl:memory-cancel',
+  MEMORY_DELETE: 'cl:memory-delete',
+  MEMORY_CLEAR_ALL: 'cl:memory-clear-all',
   OPEN_COMMAND_CENTER: 'cl:open-command-center',
   OPEN_SIDE_PANEL: 'cl:open-side-panel',
   GET_SETTINGS: 'cl:get-settings',

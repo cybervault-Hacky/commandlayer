@@ -21,6 +21,7 @@ import {
   type AIIntent,
   type AIRequest,
   type AIResponse,
+  type AISavedMemory,
 } from './types';
 
 export type AIResult =
@@ -33,6 +34,11 @@ export interface RunAIRequestOptions {
   userPrompt: string;
   /** Minimized AI context built by the caller (buildAIContext). */
   context: AIContext;
+  /**
+   * Phase 6 — bounded, already-validated saved memories to include as
+   * `<saved_memory>` data. Memory never changes the contract above.
+   */
+  memory?: readonly AISavedMemory[];
   /** External cancellation (user navigated away, superseded, retry). */
   signal: AbortSignal;
   timeoutMs?: number;
@@ -52,6 +58,9 @@ export async function runAIRequest(options: RunAIRequestOptions): Promise<AIResu
     intent: options.intent,
     userPrompt: options.userPrompt,
     context: options.context,
+    ...(options.memory && options.memory.length > 0
+      ? { memory: options.memory.slice(0, AI_LIMITS.MAX_REQUEST_MEMORIES) }
+      : {}),
     createdAt: new Date().toISOString(),
   };
 

@@ -70,6 +70,17 @@ export const ErrorCode = {
   WORKFLOW_TIMEOUT: 'WORKFLOW_TIMEOUT',
   WORKFLOW_BLOCKED: 'WORKFLOW_BLOCKED',
   WORKFLOW_CANCELLED: 'WORKFLOW_CANCELLED',
+  /**
+   * Phase 6 — memory. Memory has its own closed vocabulary so a memory
+   * failure can never be confused with an action or workflow failure.
+   */
+  MEMORY_INVALID: 'MEMORY_INVALID',
+  MEMORY_DISABLED: 'MEMORY_DISABLED',
+  MEMORY_LIMIT_EXCEEDED: 'MEMORY_LIMIT_EXCEEDED',
+  MEMORY_CONTENT_TOO_LONG: 'MEMORY_CONTENT_TOO_LONG',
+  MEMORY_SENSITIVE_BLOCKED: 'MEMORY_SENSITIVE_BLOCKED',
+  MEMORY_NOT_FOUND: 'MEMORY_NOT_FOUND',
+  MEMORY_STORAGE_FAILED: 'MEMORY_STORAGE_FAILED',
   UNEXPECTED_ERROR: 'UNEXPECTED_ERROR',
 } as const;
 
@@ -163,5 +174,17 @@ export const USER_ERROR_MESSAGES: Record<ErrorCode, string> = {
   WORKFLOW_TIMEOUT: 'The workflow took too long and was stopped.',
   WORKFLOW_BLOCKED: 'The workflow was blocked for safety.',
   WORKFLOW_CANCELLED: 'The workflow was cancelled.',
+  MEMORY_INVALID: 'That memory could not be saved.',
+  MEMORY_DISABLED:
+    'Memory is off. Turn it on in Settings to save or use personal memory.',
+  MEMORY_LIMIT_EXCEEDED:
+    'You’ve reached the saved-memory limit. Delete a memory first, or clear all memory in Settings.',
+  MEMORY_CONTENT_TOO_LONG:
+    'Memories are short by design — keep it to a sentence or two.',
+  MEMORY_SENSITIVE_BLOCKED:
+    'I can’t save passwords, codes, payment details, keys, or tokens as memory.',
+  MEMORY_NOT_FOUND: 'That memory is no longer saved.',
+  MEMORY_STORAGE_FAILED:
+    'Saved memories could not be read or written right now.',
   UNEXPECTED_ERROR: 'Something went wrong. Please try again.',
 };

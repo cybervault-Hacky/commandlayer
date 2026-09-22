@@ -7,21 +7,23 @@ Manifest V3 extension for **Microsoft Edge** that understands the page you are
 on, reasons about it on demand, and — only with your explicit approval —
 carries out short, bounded tasks in the page.
 
-Nothing runs in the background. Nothing is remembered after the session. The
-extension never collects form values, passwords, cookies, browser storage,
-authentication tokens, or browsing history, and no AI model ever receives more
-than the minimal page context a single request needs.
+Nothing runs in the background. Nothing is remembered unless you explicitly
+ask CommandLayer to remember it — and then only the sentence you confirmed,
+shown to you first and deletable at any time. The extension never collects form
+values, passwords, cookies, browser storage, authentication tokens, or browsing
+history, and no AI model ever receives more than the minimal context a single
+request needs.
 
 Built for **Microsoft Edge** (Manifest V3), and compatible with Chromium
 WebExtension APIs where practical.
 
 | | |
 | --- | --- |
-| **Version** | `0.4.0` — Phase 5 complete (Contextual Workflow Engine) |
+| **Version** | `0.5.0` — Phase 6 complete (Persistent Personal Memory) |
 | **Platform** | Microsoft Edge / Chromium, Manifest V3, `minimum_chrome_version: 116` |
 | **Publishable build** | [`extension/`](extension) — self-contained, no build step needed |
 | **Permissions** | `commands`, `sidePanel`, `storage`, `tabs` — no host permissions |
-| **Privacy** | Local-first, on-demand, session-only, zero telemetry |
+| **Privacy** | Local-first, on-demand, explicit-consent memory, zero telemetry |
 
 ---
 
@@ -127,11 +129,43 @@ and keeps what already completed. You can **pause, resume, or cancel** at any
 time, page changes stop the workflow (`WORKFLOW_CONTEXT_CHANGED`), and nothing
 is remembered after the session.
 
+### Persistent personal memory
+
+CommandLayer can remember a small set of things you explicitly ask it to
+remember — preferences, facts, working style, project context, and standing
+instructions — so you do not repeat yourself in every session. Memory is
+intentional, never automatic:
+
+- **Nothing is stored without your confirmation.** Asking produces a “Remember
+  this?” preview (content, category, source, replaces-existing) that expires
+  after two minutes and can only be confirmed once. Cancel means nothing was
+  written.
+- **Bounded by design** — at most **50** memories of **240 characters** each,
+  random opaque ids, a closed schema (`MEMORY_SCHEMA_VERSION = 1`), and no
+  page identity, URL, tab, or browsing trail in any record.
+- **Not a secret vault.** A conservative sensitive-data policy refuses
+  passwords, one-time codes, payment details, API keys, tokens, private keys,
+  seed phrases, credentials, and any value that looks like a secret. Refusals
+  never repeat the refused text.
+- **Context, never authority.** Retrieval is relevance-bound (at most **4**
+  memories accompanying a request, never the whole store), and saved memory can
+  never approve an action or workflow, change risk, skip confirmation, or
+  bypass a sensitive-field block. Your current instruction always outranks
+  saved memory.
+- **Visible and erasable.** A “Using N saved memories” note shows exactly what
+  was used; the manager lists every memory with its category and audit line;
+  single deletion and *Clear all memory* both require confirmation. Settings →
+  Memory turns memory off entirely — no writes, no retrieval.
+- **Honest about storage.** Records live in `chrome.storage.local`, which is
+  not encrypted at rest for extensions; CommandLayer does not pretend
+  otherwise. See [`docs/memory.md`](docs/memory.md).
+
 ### Deliberately not included
 
 No autonomous browsing, no always-on background agent, no scheduled or
-recurring automation, no unbounded observe→reason→act loop, no persistent
-memory, no payments, no bulk or always-allow approvals, and no integrations.
+recurring automation, no unbounded observe→reason→act loop, no passive or
+inferred memory (nothing is learned from your browsing), no memory export or
+import, no payments, no bulk or always-allow approvals, and no integrations.
 Multi-page research and cross-tab comparison are not implemented — the Phase 1
 *Research* / *Compare* quick actions were removed from the UI rather than
 faked.
@@ -165,7 +199,16 @@ faked.
   gateway, never in the extension.
 - **No persistence of work.** Conversations, reasoning results, action plans,
   and workflows are session-only. `chrome.storage.local` holds validated
-  preferences only.
+  preferences and the memories you explicitly confirmed — nothing else.
+- **Memory is opt-in and editable.** Memories exist only through an explicit
+  remember command plus a confirmed preview; they are listed, searchable,
+  deletable, clearable, and switchable off in Settings. Sensitive content is
+  refused before it can be stored, and the AI can never create, change, or
+  delete a memory.
+- **Memory never grants power.** Saved memories are retrieval-only context:
+  they cannot approve actions or workflows, change risk, skip confirmation, or
+  override a validator. Prompt content inside a memory is treated as data and
+  cannot execute.
 - **Safe errors and honest states.** The UI renders user-safe messages from a
   fixed vocabulary — never stack traces — and reports real states
   (`ready` / `partial` / `unsupported` / `unavailable` / *site access
@@ -177,7 +220,7 @@ faked.
 | --- | --- |
 | `commands` | Registers the `Ctrl+Shift+L` / `⌘⇧L` keyboard shortcut |
 | `sidePanel` | Opens and hosts the Side Panel experience |
-| `storage` | Stores validated preferences (theme, motion, gateway URL, safety toggles) |
+| `storage` | Stores validated preferences (theme, motion, gateway URL, safety toggles) and the personal memories you explicitly confirmed |
 | `tabs` | Reads the *active* tab's title and URL only |
 
 `content_scripts` matches `http://*/*` and `https://*/*`, `run_at:
@@ -273,7 +316,7 @@ duplicate-approval, and no-storage-write checks.
 npm test
 ```
 
-The suite runs **63 test files / 583 tests** and covers, among other things:
+The suite runs **70 test files / 695 tests** and covers, among other things:
 
 - **Manifest & config validation** — MV3 shape, identity, worker, popup, side
   panel, keyboard command, content-script registration (http/https only, no
@@ -303,6 +346,14 @@ The suite runs **63 test files / 583 tests** and covers, among other things:
   workflow per tab, TTL), orchestrator gates and stop conditions, bounded
   observation/replanning, concurrency budgets, adversarial inputs, the
   background message surface, and the Side Panel workflow UI.
+- **Memory (Phase 6)** — parser intents, the full sensitive-data matrix
+  (passwords, one-time codes, cards, API keys, tokens, private keys, seed
+  phrases, auth headers, cookies, high-entropy values), category inference,
+  duplicate/conflict/update detection, preview TTL and single-use
+  confirmations, bounded relevance retrieval, forged/malformed/tampered stored
+  records, schema-version and storage-failure recovery, persistence across a
+  worker restart, an injection-shaped memory staying inert, and the
+  AI-cannot-persist and workflow-unaffected boundaries.
 - **UI** — Side Panel, Popup, Command Center rendering and interactions,
   settings application, page-insight states, workflow preview → approve →
   verified result.
@@ -321,7 +372,14 @@ The suite runs **63 test files / 583 tests** and covers, among other things:
    and risk badge, approve it, and watch step-by-step progress with per-step
    verification.
 5. Reject or ignore an approval prompt — nothing executes.
-6. Open `edge://extensions` — the page is reported as unsupported and capture
+6. Say `remember that I prefer TypeScript` — the “Remember this?” card appears
+   and **nothing** is stored until you confirm. Confirm it, then ask
+   `explain how I prefer to write code` and check the *Using 1 saved memory*
+   note.
+7. Say `remember my password is hunter2` — it is refused (“Nothing was
+   stored.”). Open Settings → Memory, turn memory off, and repeat step 6: the
+   command is refused and no memory is used.
+8. Open `edge://extensions` — the page is reported as unsupported and capture
    is unavailable.
 
 > An automated browser smoke test is deliberately **not** part of the
@@ -340,10 +398,11 @@ The suite runs **63 test files / 583 tests** and covers, among other things:
 | 3 | Real AI Reasoning Engine & Secure Intelligence Gateway — intent resolution, injection-defended prompts, validated responses | Delivered |
 | 4 | Safe Action Engine — typed bounded actions with Preview → Permission → Execute → Verify | Delivered |
 | 5 | Contextual Workflow Engine — bounded multi-step tasks, hash-bound approvals, per-step verification | Delivered |
-| 6+ | Not started | — |
+| 6 | Persistent Personal Memory — user-approved memories with confirmation, sensitive-data refusal, bounded retrieval, deletion, and a privacy switch | Delivered |
+| 7+ | Not started | — |
 
-Current release: **CommandLayer 0.4.0**, `manifest_version: 3`, `Phase 5 Task
-Intelligence`.
+Current release: **CommandLayer 0.5.0**, `manifest_version: 3`, `Phase 6
+Personal Memory`.
 
 ---
 
@@ -365,10 +424,19 @@ Intelligence`.
   requires deploying the Secure Gateway and setting `VITE_AI_GATEWAY_URL`.
 - **Single page, on demand.** No crawling, link-following, cross-tab context,
   or conversation persistence.
+- **Memory is deliberately small and literal.** Up to 50 memories of 240
+  characters, only from explicit `remember` commands (never inferred from
+  browsing or answers), stored unencrypted in `chrome.storage.local` — no
+  encryption is claimed without key management, and export/import are not
+  implemented. Category and duplicate detection are deterministic heuristics,
+  and a memory that shares no vocabulary with a request is not used at all.
 - **Page intelligence is an extraction baseline**, not reader-mode: a
   deterministic readable-content heuristic with fixed caps. Unusual page
   structures may produce imperfect (always bounded) results, flagged
   `partial`; iframes are not captured (`all_frames: false`).
+- **Retrieval is narrow.** Memory never overrides your current instruction, and
+  conflicts resolve to the most recently updated memory (the older one is
+  dropped for that request) rather than being merged.
 - **Themes** are dark and light (no system-following yet).
 - **Dev preview caveats.** `npm run dev` persists settings in memory only and
   cannot reach a real content script, so page insight degrades to *site access
@@ -385,7 +453,8 @@ explicit permission, bounded execution, verification:
 - multi-page research and cross-tab comparison;
 - a wider typed action vocabulary;
 - integrations through the integration registry;
-- session continuity.
+- memory export/import once it can be proven not to leak secrets, and richer
+  memory conflict handling.
 
 ---
 
@@ -398,6 +467,10 @@ explicit permission, bounded execution, verification:
   Workflow Engine: understanding, planning, validation, state machine,
   approval binding, observation and verification, replanning, concurrency,
   privacy, extension points.
+- [`docs/memory.md`](docs/memory.md) — Persistent Personal Memory: the memory
+  model, categories, consent flow, sensitive-data policy, storage and schema,
+  bounded retrieval, privacy controls and deletion, the AI and workflow
+  boundaries, limits, and honest limitations.
 
 ---
 

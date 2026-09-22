@@ -133,6 +133,18 @@ function buildSuccessCandidate(request: AIRequest): AIResponseCandidate {
 
   const { answer, sections } = buildContent(request, title, hostname, lead, headingList);
 
+  // Phase 6: the local mock has no model, but it must still show honestly
+  // that saved context reached it — and only what it received.
+  const savedContext = request.memory ?? [];
+  if (savedContext.length > 0) {
+    sections.push({
+      title: 'Saved context',
+      content: savedContext
+        .map((memory) => `- [${memory.kind}] ${memory.content}`)
+        .join('\n'),
+    });
+  }
+
   return {
     requestId: request.requestId,
     intent: request.intent,

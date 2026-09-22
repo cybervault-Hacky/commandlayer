@@ -332,6 +332,54 @@ export function IconShieldCheck(props: IconProps) {
   );
 }
 
+export function IconMemory(props: IconProps) {
+  const { size = 16, ...rest } = props;
+  return (
+    <svg {...svgProps(size, rest)}>
+      <path d="M7 4h10a1.5 1.5 0 0 1 1.5 1.5V20L12 16.4 5.5 20V5.5A1.5 1.5 0 0 1 7 4Z" />
+      <path d="M9.5 8.5h5" />
+    </svg>
+  );
+}
+
+export function IconSearch(props: IconProps) {
+  const { size = 16, ...rest } = props;
+  return (
+    <svg {...svgProps(size, rest)}>
+      <circle cx="11" cy="11" r="6" />
+      <path d="m15.6 15.6 4 4" />
+    </svg>
+  );
+}
+
+export function IconChevronDown(props: IconProps) {
+  const { size = 16, ...rest } = props;
+  return (
+    <svg {...svgProps(size, rest)}>
+      <path d="m6 9.5 6 6 6-6" />
+    </svg>
+  );
+}
+
+export function IconChevronRight(props: IconProps) {
+  const { size = 16, ...rest } = props;
+  return (
+    <svg {...svgProps(size, rest)}>
+      <path d="m9.5 6 6 6-6 6" />
+    </svg>
+  );
+}
+
+export function IconLock(props: IconProps) {
+  const { size = 16, ...rest } = props;
+  return (
+    <svg {...svgProps(size, rest)}>
+      <rect x="5" y="10.5" width="14" height="9.5" rx="2" />
+      <path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5" />
+    </svg>
+  );
+}
+
 /* --- Brand --- */
 
 export function BrandMark({

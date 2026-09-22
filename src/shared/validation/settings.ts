@@ -25,6 +25,10 @@ export function parseStoredSettings(raw: unknown): Settings | null {
       typeof record.reduceMotion === 'boolean' ? record.reduceMotion : false,
     onboardingSeen:
       typeof record.onboardingSeen === 'boolean' ? record.onboardingSeen : false,
+    // Phase 6 field: absent in pre-Phase-6 blobs → memory defaults to on
+    // (writes still require an explicit confirmation every time).
+    memoryEnabled:
+      typeof record.memoryEnabled === 'boolean' ? record.memoryEnabled : true,
   };
 }
 
@@ -57,6 +61,12 @@ export function validateSettingsPatch(patch: unknown): SettingsPatchValidation {
       return { ok: false, error: 'onboardingSeen must be a boolean' };
     }
     out.onboardingSeen = record.onboardingSeen;
+  }
+  if ('memoryEnabled' in record) {
+    if (typeof record.memoryEnabled !== 'boolean') {
+      return { ok: false, error: 'memoryEnabled must be a boolean' };
+    }
+    out.memoryEnabled = record.memoryEnabled;
   }
 
   if (Object.keys(out).length === 0) {

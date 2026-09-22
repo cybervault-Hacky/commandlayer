@@ -52,6 +52,14 @@ export interface UseCommandPipelineResult extends PipelineState {
   cancelWorkflow: (workflowId: string) => Promise<void>;
   /** Read-only status refresh (bounded UI progress polling). */
   refreshWorkflow: (workflowId: string) => Promise<void>;
+  /**
+   * Phase 6 — commit ONE pending memory preview. Only the preview id
+   * crosses the boundary; the background re-validates the policy and the
+   * limits at commit time and stays the only writer.
+   */
+  confirmMemory: (previewId: string) => Promise<void>;
+  /** Withdraw a pending memory preview — nothing was stored. */
+  cancelMemory: (previewId: string) => Promise<void>;
   /** Re-run the last submitted command (enabled only when retryable). */
   retry: () => Promise<void>;
   reset: () => void;
@@ -208,11 +216,29 @@ export function useCommandPipeline(
     [run],
   );
 
+  const confirmMemory = useCallback(
+    (previewId: string) =>
+      run(() =>
+        sendMessage(MessageType.MEMORY_CONFIRM, { previewId, source }),
+      ),
+    [run, source],
+  );
+
   const reset = useCallback(() => {
     runSeqRef.current += 1;
     lastExecuteRef.current = null;
     setState({ phase: 'idle', result: null, errorMessage: null });
   }, []);
+
+  const cancelMemory = useCallback(
+    async (previewId: string) => {
+      // Fire-and-forget withdrawal: the preview simply stops being
+      // pending, and the UI clears the confirmation card.
+      void sendMessage(MessageType.MEMORY_CANCEL, { previewId });
+      reset();
+    },
+    [reset],
+  );
 
   const cancelPlan = useCallback(
     async (planId: string) => {
@@ -243,6 +269,8 @@ export function useCommandPipeline(
     resumeWorkflow,
     cancelWorkflow,
     refreshWorkflow,
+    confirmMemory,
+    cancelMemory,
     retry,
     reset,
   };

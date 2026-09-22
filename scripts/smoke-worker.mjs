@@ -8,7 +8,7 @@
  *
  * Usage: npm run smoke   (run `npm run build` first)
  */
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { JSDOM } from 'jsdom';
@@ -148,6 +148,12 @@ const listeners = {};
 const manifestData = manifest;
 let activeTabId = 1;
 let storageWrites = 0;
+/**
+ * A real storage map, not a stub that forgets: Phase 6 must prove that a
+ * confirmed memory survives a worker restart, so `get` returns exactly what
+ * a previous `set` wrote. (Only writes are counted, as in earlier phases.)
+ */
+const storageValues = new Map();
 globalThis.chrome = {
   runtime: {
     id: 'smoke-test-extension',
@@ -159,10 +165,17 @@ globalThis.chrome = {
   commands: { onCommand: { addListener: (fn) => { listeners.onCommand = fn; } } },
   storage: {
     local: {
-      get: async () => ({}),
-      // Counted so Phase 5 can prove workflows are never persisted.
-      set: async () => {
+      get: async (key) => {
+        if (typeof key !== 'string') return {};
+        return storageValues.has(key) ? { [key]: storageValues.get(key) } : {};
+      },
+      // Counted so Phase 5 can prove workflows are never persisted, and
+      // Phase 6 can prove memory only changes on an explicit confirmation.
+      set: async (items) => {
         storageWrites += 1;
+        for (const [key, value] of Object.entries(items ?? {})) {
+          storageValues.set(key, value);
+        }
       },
     },
   },
@@ -200,7 +213,7 @@ const sender = { id: 'smoke-test-extension' };
 const ping = await listeners.onMessage({ v: 1, id: 's1', type: 'cl:ping' }, sender);
 assert(ping.ok === true, 'PING resolves ok');
 assert(ping.data?.pong === true, 'PING payload correct');
-assert(ping.data?.version === '0.4.0', 'PING reports version');
+assert(ping.data?.version === '0.5.0', 'PING reports version');
 
 const status = await listeners.onMessage(
   { v: 1, id: 's2', type: 'cl:get-extension-status' },
@@ -208,7 +221,7 @@ const status = await listeners.onMessage(
 );
 assert(status.ok === true, 'GET_EXTENSION_STATUS resolves ok');
 assert(status.data?.environment === 'extension', 'environment detected as extension');
-assert(status.data?.version === '0.4.0', 'status version matches manifest');
+assert(status.data?.version === '0.5.0', 'status version matches manifest');
 assert(status.data?.ai?.providerId === 'local-mock', 'status reports the local mock provider');
 assert(status.data?.ai?.gatewayConfigured === false, 'status reports no gateway configured');
 assert(!/key|secret|token/i.test(JSON.stringify(status.data?.ai ?? {})), 'AI status carries no secrets');
@@ -946,5 +959,311 @@ assert(
   storageWrites === storageWritesBeforeWorkflows,
   'workflows are never persisted to extension storage',
 );
+
+
+// --- Phase 6: Persistent Personal Memory ------------------------------------
+// create → validate → confirm → store → retrieve → use → delete → verify gone.
+// Everything below runs against the REAL built background bundle: the only
+// thing simulated is the browser.
+
+const MEMORY_KEY = 'commandlayer.memory.v1';
+let smokeSeq = 200;
+/** Send one message through the freshly-registered worker listener. */
+async function send(type, payload, who = sender) {
+  smokeSeq += 1;
+  const message = { v: 1, id: `p${smokeSeq}`, type, ...(payload ? { payload } : {}) };
+  return listeners.onMessage(message, who);
+}
+const memoryBlob = () => storageValues.get(MEMORY_KEY);
+const memoryBlobJson = () => JSON.stringify(memoryBlob() ?? null);
+
+const emptyStatus = await send('cl:memory-status');
+assert(emptyStatus.ok === true, 'MEMORY_STATUS resolves ok');
+assert(emptyStatus.data?.total === 0, 'memory starts empty');
+assert(emptyStatus.data?.enabled === true, 'memory is ON by default');
+assert(emptyStatus.data?.storageAvailable === true, 'memory storage reported available');
+
+const writesBeforeMemory = storageWrites;
+
+// 1. A memory request is only ever a PROPOSAL: nothing is written yet.
+const proposal = await send('cl:command-submit', {
+  text: 'Remember that I prefer TypeScript.',
+  source: 'sidepanel',
+});
+assert(proposal.ok === true, 'memory command resolves ok');
+assert(proposal.data?.status === 'completed', 'memory proposal is a completed command');
+assert(proposal.data?.memory?.action === 'CREATE', 'memory request produced a CREATE preview');
+assert(proposal.data?.memory?.kind === 'PREFERENCE', 'preview carries the inferred category');
+assert(
+  proposal.data?.memory?.content === 'I prefer TypeScript',
+  'preview carries the normalized content',
+);
+assert(proposal.data?.memory?.source === 'USER_EXPLICIT', 'preview records the explicit source');
+assert(proposal.data?.memoryResult === undefined, 'proposal produced no result');
+assert(typeof proposal.data?.memory?.previewId === 'string', 'preview carries an id');
+assert(storageWrites === writesBeforeMemory, 'proposing a memory writes NOTHING to storage');
+assert(memoryBlob() === undefined, 'no memory key exists before confirmation');
+
+// 2. Confirmation stores it (and only then).
+const previewId = proposal.data.memory.previewId;
+const confirmed = await send('cl:memory-confirm', { previewId, source: 'sidepanel' });
+assert(confirmed.ok === true, 'MEMORY_CONFIRM resolves ok');
+assert(confirmed.data?.memoryResult?.action === 'SAVED', 'confirmation reports SAVED');
+assert(confirmed.data?.memoryResult?.total === 1, 'confirmation reports the new total');
+const savedRecord = confirmed.data?.memoryResult?.records?.[0];
+assert(savedRecord?.content === 'I prefer TypeScript', 'stored content is the confirmed text');
+assert(savedRecord?.kind === 'PREFERENCE', 'stored memory carries its category');
+assert(
+  (savedRecord?.audit ?? '').includes('explicitly asked'),
+  'stored memory carries the audit line',
+);
+assert(storageWrites === writesBeforeMemory + 1, 'confirmation wrote memory exactly once');
+
+// 3. What is actually on disk: schema-versioned, minimal, non-secret.
+const blob = memoryBlob();
+assert(blob?.schema === 1, 'stored memory blob is schema 1');
+assert(Array.isArray(blob?.records) && blob.records.length === 1, 'one record persisted');
+const stored = blob.records[0];
+assert(typeof stored.id === 'string' && stored.id.length === 24, 'record id is opaque and fixed-length');
+assert(stored.source === 'USER_EXPLICIT', 'record source is USER_EXPLICIT');
+assert(stored.confidence === 'HIGH', 'record confidence is HIGH');
+assert(stored.enabled === true, 'record is enabled');
+assert(stored.scope === 'GLOBAL', 'record scope is GLOBAL (no website scoping)');
+assert(!('url' in stored) && !('tabId' in stored), 'record stores no page identity');
+assert(
+  Object.keys(stored).sort().join(',') ===
+    'confidence,content,createdAt,enabled,id,kind,project,scope,source,updatedAt',
+  'record has no extra metadata',
+);
+
+// 4. A confirmation is single-use: replaying it stores nothing.
+const writesAfterConfirm = storageWrites;
+const replay = await send('cl:memory-confirm', { previewId, source: 'sidepanel' });
+assert(replay.ok === true, 'replayed confirmation is answered');
+assert(replay.data?.status === 'failed', 'replayed confirmation fails');
+assert(replay.data?.errorCode === 'MEMORY_INVALID', 'replayed confirmation reports MEMORY_INVALID');
+assert(storageWrites === writesAfterConfirm, 'replayed confirmation writes nothing');
+assert(memoryBlob().records.length === 1, 'no duplicate record was created');
+
+// 5. Malformed memory payloads are rejected before anything happens.
+for (const [type, payload] of [
+  ['cl:memory-confirm', {}],
+  ['cl:memory-confirm', { previewId: 'x'.repeat(129), source: 'sidepanel' }],
+  ['cl:memory-confirm', { previewId, source: 'somewhere-else' }],
+  ['cl:memory-cancel', {}],
+  ['cl:memory-delete', {}],
+  ['cl:memory-delete', { memoryId: stored.id }],
+  ['cl:memory-clear-all', {}],
+  ['cl:memory-list', { kind: 'SECRET' }],
+]) {
+  const bad = await send(type, payload);
+  assert(bad.ok === false, `malformed ${type} payload rejected`);
+  assert(bad.error?.code === 'INVALID_PAYLOAD', `malformed ${type} reports INVALID_PAYLOAD`);
+}
+assert(memoryBlob().records.length === 1, 'malformed messages never touched stored memory');
+
+// 6. Retrieval is relevance-bound and never dumps the store.
+const related = await send('cl:command-submit', {
+  text: 'Explain how I prefer to write code.',
+  source: 'sidepanel',
+});
+assert(related.ok === true, 'reasoning command with memory resolves ok');
+assert(related.data?.memoriesUsed?.length === 1, 'exactly one relevant memory was used');
+assert(
+  related.data?.memoriesUsed?.[0]?.content === 'I prefer TypeScript',
+  'the used memory is the saved one',
+);
+const savedContext = (related.data?.ai?.sections ?? []).find(
+  (section) => section?.title === 'Saved context',
+);
+assert(!!savedContext, 'the provider received the saved memory as data');
+assert(
+  (savedContext?.content ?? '').includes('I prefer TypeScript'),
+  'saved memory reached the AI request inside its own block',
+);
+
+const unrelated = await send('cl:command-submit', {
+  text: 'Summarize this page.',
+  source: 'sidepanel',
+});
+assert(unrelated.ok === true, 'unrelated command resolves ok');
+assert(unrelated.data?.memoriesUsed === undefined, 'unrelated commands retrieve no memory');
+
+// 7. Sensitive content is refused, never stored, never echoed.
+const writesBeforeSecret = storageWrites;
+const secret = await send('cl:command-submit', {
+  text: 'Remember that my password is hunter2.',
+  source: 'sidepanel',
+});
+assert(secret.ok === true, 'sensitive memory request is answered as a result');
+assert(secret.data?.status === 'failed', 'sensitive memory request failed');
+assert(secret.data?.memoryResult?.action === 'BLOCKED', 'sensitive memory reports BLOCKED');
+assert(secret.data?.memoryResult?.records?.length === 0, 'a refused memory returns no records');
+assert(secret.data?.memoryResult?.total === 0, 'a refused memory stores nothing');
+// The shipped UI states the guarantee to the user.
+const shippedAssets = readdirSync(join(extensionDir, 'assets'))
+  .filter((name) => name.endsWith('.js'))
+  .map((name) => readFileSync(join(extensionDir, 'assets', name), 'utf8'))
+  .join('\n');
+assert(shippedAssets.includes('Nothing was stored.'), 'the shipped UI states "Nothing was stored."');
+assert(
+  secret.data?.errorCode === 'MEMORY_SENSITIVE_BLOCKED',
+  'sensitive memory reports MEMORY_SENSITIVE_BLOCKED',
+);
+// The command text is echoed back to the panel that typed it, but the
+// memory result itself never repeats the refused text.
+assert(
+  !JSON.stringify(secret.data?.memoryResult ?? {}).includes('hunter2'),
+  'the refused secret is never repeated in the memory result',
+);
+assert(
+  !JSON.stringify(secret.data?.text ?? '').includes('hunter2'),
+  'the refusal wording never repeats the refused text',
+);
+assert(storageWrites === writesBeforeSecret, 'a refused memory writes nothing');
+assert(
+  !memoryBlobJson().includes('hunter2') && !memoryBlobJson().includes('password'),
+  'no secret text anywhere in stored memory',
+);
+
+// 8. Memory OFF: no writes and no retrieval (inspection still available).
+await send('cl:set-settings', { patch: { memoryEnabled: false } });
+const offStatus = await send('cl:memory-status');
+assert(offStatus.data?.enabled === false, 'memory switch is off');
+const writesWhileOff = storageWrites;
+const offRemember = await send('cl:command-submit', {
+  text: 'Remember that I prefer Neovim.',
+  source: 'sidepanel',
+});
+assert(offRemember.data?.status === 'failed', 'memory command fails while memory is off');
+assert(offRemember.data?.memoryResult?.action === 'DISABLED', 'off-state reports DISABLED');
+assert(
+  (offRemember.data?.memoryResult?.message ?? '').includes('Memory is off'),
+  'off-state message is the documented one',
+);
+assert(storageWrites === writesWhileOff, 'nothing is written while memory is off');
+const offReasoning = await send('cl:command-submit', {
+  text: 'Explain how I prefer to write code.',
+  source: 'sidepanel',
+});
+assert(
+  offReasoning.data?.memoriesUsed === undefined,
+  'no memory is retrieved or used while memory is off',
+);
+const offList = await send('cl:memory-list', {});
+assert(offList.ok === true, 'saved memories remain inspectable while memory is off');
+assert(offList.data?.records?.length === 1, 'existing memory is retained while memory is off');
+assert(offList.data?.enabled === false, 'listing reports the off state');
+await send('cl:set-settings', { patch: { memoryEnabled: true } });
+
+// 9. Deletion requires an explicit confirmation and verifiably removes it.
+const deleteNoFlag = await send('cl:memory-delete', { memoryId: stored.id });
+assert(deleteNoFlag.ok === false, 'deletion without an explicit confirm flag is rejected');
+const deleted = await send('cl:memory-delete', { memoryId: stored.id, confirm: true });
+assert(deleted.ok === true, 'confirmed deletion resolves ok');
+assert(deleted.data?.action === 'DELETED', 'confirmed deletion reports DELETED');
+assert(memoryBlob().records.length === 0, 'the record is gone from storage');
+const afterDelete = await send('cl:memory-list', {});
+assert(afterDelete.data?.records?.length === 0, 'the memory is no longer listed');
+const deleteAgain = await send('cl:memory-delete', { memoryId: stored.id, confirm: true });
+assert(deleteAgain.data?.action !== 'DELETED', 'deleting a missing memory is not a success');
+const deleteGoneReasoning = await send('cl:command-submit', {
+  text: 'Explain how I prefer to write code.',
+  source: 'sidepanel',
+});
+assert(
+  deleteGoneReasoning.data?.memoriesUsed === undefined,
+  'a deleted memory is never retrieved again',
+);
+
+// 10. "Clear all memory" needs its own explicit confirmation.
+for (const text of [
+  'Remember that I prefer TypeScript.',
+  'Remember that I live in Pune.',
+  'Remember that I write tests before code.',
+]) {
+  const proposed = await send('cl:command-submit', { text, source: 'sidepanel' });
+  if (proposed.data?.memory?.previewId) {
+    await send('cl:memory-confirm', {
+      previewId: proposed.data.memory.previewId,
+      source: 'sidepanel',
+    });
+  } else {
+    // A duplicate is reported, not stored twice.
+    assert(
+      proposed.data?.memoryResult?.action === 'ALREADY_SAVED',
+      `duplicate memory reported instead of stored twice (${text})`,
+    );
+  }
+}
+const beforeClear = await send('cl:memory-status');
+assert(beforeClear.data.total === 3, 'the store holds the three distinct memories');
+const clearNoFlag = await send('cl:memory-clear-all', {});
+assert(clearNoFlag.ok === false, 'clear-all without an explicit confirm flag is rejected');
+assert(memoryBlob().records.length === 3, 'rejected clear-all changed nothing');
+const cleared = await send('cl:memory-clear-all', { confirm: true });
+assert(cleared.ok === true, 'confirmed clear-all resolves ok');
+assert(cleared.data?.action === 'CLEARED', 'confirmed clear-all reports CLEARED');
+assert(memoryBlob().records.length === 0, 'clear-all emptied the stored records');
+const afterClear = await send('cl:memory-status');
+assert(afterClear.data?.total === 0, 'clear-all reports an empty store');
+
+// 11. Privacy: normal use never writes memory — browsing, capture, reasoning,
+//     quick actions, actions, and workflows all leave it untouched.
+const writesBeforeBrowsing = storageWrites;
+const blobBeforeBrowsing = memoryBlobJson();
+await send('cl:get-current-page');
+await send('cl:get-page-context', { sections: ['metadata', 'headings'] });
+await send('cl:command-submit', { text: 'Summarize this page.', source: 'sidepanel' });
+await send('cl:command-submit', { text: 'Analyze this page.', source: 'sidepanel' });
+await send('cl:quick-action', { actionId: 'explain', source: 'command-center' });
+await send('cl:command-submit', { text: 'find "GitHub"', source: 'sidepanel' });
+await send('cl:workflow-create', {
+  goal: 'find "GitHub" and read the page',
+  source: 'sidepanel',
+});
+assert(
+  memoryBlobJson() === blobBeforeBrowsing,
+  'normal use (browsing, capture, reasoning, actions, workflows) never writes memory',
+);
+assert(storageWrites === writesBeforeBrowsing, 'normal use performs no storage writes at all');
+const afterBrowsing = await send('cl:memory-status');
+assert(afterBrowsing.data?.total === 0, 'the store is still empty after normal use');
+
+// 12. Persistence: a confirmed memory survives a service-worker restart.
+const persisted = await send('cl:command-submit', {
+  text: 'Remember that I prefer TypeScript.',
+  source: 'sidepanel',
+});
+assert(persisted.data?.memory?.action === 'CREATE', 'fresh memory proposed before restart');
+const persistedId = persisted.data.memory.previewId;
+const persistedConfirm = await send('cl:memory-confirm', {
+  previewId: persistedId,
+  source: 'sidepanel',
+});
+assert(persistedConfirm.data?.memoryResult?.action === 'SAVED', 'memory saved before restart');
+const writesBeforeRestart = storageWrites;
+
+// Drop every in-memory singleton: re-importing the bundle is a new worker.
+await import(`${join(extensionDir, 'background.js')}?restart=1`);
+assert(typeof listeners.onMessage === 'function', 'restarted worker registered its listener');
+assert(storageWrites === writesBeforeRestart, 'a worker restart writes nothing');
+
+const statusAfterRestart = await send('cl:memory-status');
+assert(statusAfterRestart.ok === true, 'restarted worker answers MEMORY_STATUS');
+assert(statusAfterRestart.data?.total === 1, 'the saved memory survived the restart');
+const listAfterRestart = await send('cl:memory-list', {});
+assert(listAfterRestart.data?.records?.length === 1, 'the saved memory is still listed');
+const recallAfterRestart = await send('cl:command-submit', {
+  text: 'Explain how I prefer to write code.',
+  source: 'sidepanel',
+});
+assert(
+  recallAfterRestart.data?.memoriesUsed?.[0]?.content === 'I prefer TypeScript',
+  'the saved memory is retrieved and used after the restart',
+);
+const clearedAfterRestart = await send('cl:memory-clear-all', { confirm: true });
+assert(clearedAfterRestart.data?.action === 'CLEARED', 'memory can still be cleared after a restart');
+assert(memoryBlob().records.length === 0, 'clearing after a restart removes the records');
 
 console.log('\nWorker smoke test: all checks passed.');

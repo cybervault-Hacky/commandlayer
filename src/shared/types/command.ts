@@ -6,6 +6,11 @@ import type {
   WorkflowRunResult,
   WorkflowView,
 } from '@/workflows/types';
+import type {
+  MemoryPreviewView,
+  MemoryResultView,
+  MemoryUsedView,
+} from '@/memory/types';
 
 export type QuickActionId = QuickActionIdType;
 
@@ -94,6 +99,18 @@ export interface CommandResult {
   workflowRun?: WorkflowRunResult;
   /** Phase 5 — how the request was understood (deterministic analysis). */
   understanding?: WorkflowUnderstandingView;
+  /**
+   * Phase 6 — a memory change awaiting the user's explicit confirmation
+   * (status is 'completed'; nothing has been stored yet).
+   */
+  memory?: MemoryPreviewView;
+  /** Phase 6 — the bounded outcome of a memory operation. */
+  memoryResult?: MemoryResultView;
+  /**
+   * Phase 6 — saved memories that were relevant to this command and were
+   * used as context (bounded, already-sanitized, user-owned data).
+   */
+  memoriesUsed?: MemoryUsedView[];
   /** Whether a retry may succeed (transient errors only). */
   retryable?: boolean;
   errorCode?: string;

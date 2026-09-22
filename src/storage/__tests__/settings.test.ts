@@ -15,12 +15,40 @@ describe('settings storage', () => {
 
   it('returns defaults when nothing is stored', async () => {
     const settings = await getSettings();
+    // Phase 6 added `memoryEnabled` (default on): the stored schema is
+    // unchanged, so pre-Phase-6 blobs still load with memory on.
     expect(settings).toEqual({
       schema: 1,
       theme: 'dark',
       reduceMotion: false,
       onboardingSeen: false,
+      memoryEnabled: true,
     });
+  });
+
+  it('defaults the Phase 6 memory switch to on for pre-Phase-6 blobs', async () => {
+    await getStorageBackend().set(STORAGE_KEYS.settings, {
+      schema: 1,
+      theme: 'dark',
+      reduceMotion: false,
+      onboardingSeen: true,
+    });
+    const settings = await getSettings();
+    expect(settings.memoryEnabled).toBe(true);
+    expect(settings.onboardingSeen).toBe(true);
+  });
+
+  it('persists the Phase 6 memory switch', async () => {
+    await updateSettings({ memoryEnabled: false });
+    expect((await getSettings()).memoryEnabled).toBe(false);
+    const raw = await getStorageBackend().get(STORAGE_KEYS.settings);
+    expect(raw).toMatchObject({ memoryEnabled: false });
+  });
+
+  it('rejects a non-boolean memory switch', async () => {
+    await expect(
+      updateSettings({ memoryEnabled: 'off' as never }),
+    ).rejects.toThrow(/settings change/i);
   });
 
   it('persists a settings update', async () => {

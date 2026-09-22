@@ -1,6 +1,7 @@
 import { APP_NAME, APP_VERSION, PHASE_LABEL } from '@/shared/constants/app';
 import { WORKFLOW_LIMITS } from '@/workflows/limits';
 import { useExtensionStatus } from '@/shared/hooks/useExtensionStatus';
+import { useMemory } from '@/shared/hooks/useMemory';
 import { useSettings } from '@/shared/hooks/useSettings';
 import { getCommandLayerShortcut } from '@/shared/platform';
 import {
@@ -10,7 +11,14 @@ import {
 import { Segmented } from '@/shared/components/Segmented';
 import { StatusDot } from '@/shared/components/StatusDot';
 import { Toggle } from '@/shared/components/Toggle';
-import { IconChevronLeft, IconShield, IconShieldCheck, IconSparkle, IconSteps } from '@/shared/components/icons';
+import {
+  IconChevronLeft,
+  IconMemory,
+  IconShield,
+  IconShieldCheck,
+  IconSparkle,
+  IconSteps,
+} from '@/shared/components/icons';
 
 const THEME_OPTIONS: readonly { value: ThemeType; label: string }[] = [
   { value: Theme.Dark, label: 'Dark' },
@@ -18,13 +26,21 @@ const THEME_OPTIONS: readonly { value: ThemeType; label: string }[] = [
 ];
 
 /**
- * Phase 1 settings. Every control is a real, working feature:
- * theme switching, reduce motion, shortcut information, privacy and version.
- * No placeholder settings for features that do not exist yet.
+ * Settings. Every control is a real, working feature: theme switching,
+ * reduce motion, the Phase 6 memory privacy switch and its manager,
+ * shortcut information, safety explanations, privacy, and version. No
+ * placeholder settings for features that do not exist yet.
  */
-export function SettingsView({ onBack }: { onBack: () => void }) {
+export function SettingsView({
+  onBack,
+  onOpenMemory,
+}: {
+  onBack: () => void;
+  onOpenMemory: () => void;
+}) {
   const { settings, update } = useSettings();
   const status = useExtensionStatus();
+  const memory = useMemory();
   const shortcut = getCommandLayerShortcut();
 
   return (
@@ -171,6 +187,63 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
           </ul>
         </section>
 
+        <section className="cl-card p-4" aria-labelledby="settings-memory">
+          <h2 id="settings-memory" className="section-label">
+            Memory
+          </h2>
+          <div className="mt-3">
+            <Toggle
+              id="memory-enabled"
+              label="Memory"
+              description="Remember useful information you explicitly choose to save."
+              checked={settings.memoryEnabled}
+              onChange={(value) => {
+                void update({ memoryEnabled: value });
+              }}
+            />
+          </div>
+
+          <div className="mt-3 flex items-center justify-between gap-3 border-t border-border pt-3">
+            <span className="flex items-center gap-2 text-[12.5px] font-medium text-text-primary">
+              <IconMemory size={14} className="text-accent" />
+              Saved memories
+            </span>
+            <span className="flex items-center gap-2">
+              <span className="font-mono text-[12px] tabular-nums text-text-secondary">
+                {memory.total}
+              </span>
+              <button
+                type="button"
+                className="cl-btn-ghost"
+                onClick={onOpenMemory}
+              >
+                Manage memory
+              </button>
+            </span>
+          </div>
+
+          {!settings.memoryEnabled && (
+            <p className="mt-2.5 text-[11px] leading-4 text-warning">
+              Memory is off. CommandLayer will not save or use personal
+              memory. Memories saved earlier stay stored until you delete
+              them.
+            </p>
+          )}
+
+          <div className="mt-3 border-t border-border pt-3">
+            <div className="flex items-start gap-2.5">
+              <IconShield size={15} className="mt-0.5 shrink-0 text-text-muted" />
+              <p className="text-[11.5px] leading-4.5 text-text-secondary">
+                Memory is never collected silently. Nothing is saved without
+                your confirmation, passwords and secrets are refused, page
+                content never becomes memory, and the AI can never write or
+                change a memory. Only the few memories relevant to a request
+                are used.
+              </p>
+            </div>
+          </div>
+        </section>
+
         <section className="cl-card p-4" aria-labelledby="settings-shortcut">
           <h2 id="settings-shortcut" className="section-label">
             Keyboard shortcut
@@ -197,7 +270,8 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
           <div className="mt-3 flex items-start gap-2.5">
             <IconShield size={15} className="mt-0.5 shrink-0 text-text-muted" />
             <p className="text-[11.5px] leading-4.5 text-text-secondary">
-              CommandLayer stores your preferences locally in this browser.
+              CommandLayer stores your preferences and any memories you
+              explicitly saved locally in this browser.
               Reasoning requests include only the minimized page context
               needed for your intent — form fields and their values are
               never sent. Transcripts are session-only and never stored.

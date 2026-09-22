@@ -12,6 +12,12 @@ export interface Settings {
   theme: Theme;
   reduceMotion: boolean;
   onboardingSeen: boolean;
+  /**
+   * Phase 6 — the memory privacy switch. When off, CommandLayer neither
+   * saves nor uses personal memory (existing memories stay stored until
+   * the user deletes them, so they remain inspectable and deletable).
+   */
+  memoryEnabled: boolean;
 }
 
 /** Partial, validated settings update. */
@@ -19,4 +25,5 @@ export interface SettingsPatch {
   theme?: Theme;
   reduceMotion?: boolean;
   onboardingSeen?: boolean;
+  memoryEnabled?: boolean;
 }

@@ -60,6 +60,17 @@ export interface AIContext {
   truncated: boolean;
 }
 
+/**
+ * Phase 6 — one saved memory as the AI sees it. Deliberately tiny: a
+ * category and the user's own words. Memory is DATA (never instructions),
+ * it is bounded in count, and it is only ever attached when it is
+ * relevant to the request.
+ */
+export interface AISavedMemory {
+  kind: string;
+  content: string;
+}
+
 /** A fully-typed, validated request for the AI reasoning engine. */
 export interface AIRequest {
   requestId: string;
@@ -67,6 +78,11 @@ export interface AIRequest {
   /** The user's own words (command text / question). */
   userPrompt: string;
   context: AIContext;
+  /**
+   * Phase 6 — relevant saved memories the user explicitly stored. Absent
+   * or empty when memory is off or nothing was relevant.
+   */
+  memory?: readonly AISavedMemory[];
   createdAt: string;
 }
 
