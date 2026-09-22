@@ -40,7 +40,7 @@ describe('Popup', () => {
 
     // Shortcut information and version footer.
     expect(screen.getByText(/opens commandlayer/i)).toBeInTheDocument();
-    expect(screen.getByText(/v0\.1\.0/i)).toBeInTheDocument();
+    expect(screen.getByText(/v0\.2\.0/i)).toBeInTheDocument();
   });
 
   it('opens the side panel when requested', async () => {

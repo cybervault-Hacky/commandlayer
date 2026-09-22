@@ -1,5 +1,6 @@
 import type { PageContext } from './page';
 import type { QuickActionId as QuickActionIdType } from '../constants/quickActions';
+import type { AIIntent, AIResponse } from '@/ai/types';
 
 export type QuickActionId = QuickActionIdType;
 
@@ -12,11 +13,18 @@ export const CommandSource = {
 
 export type CommandSource = (typeof CommandSource)[keyof typeof CommandSource];
 
+export function isCommandSource(value: unknown): value is CommandSource {
+  return (
+    typeof value === 'string' &&
+    Object.values(CommandSource).includes(value as CommandSource)
+  );
+}
+
 export type CommandStatus = 'completed' | 'failed';
 
 /**
  * A structured, validated command request. This is the stable contract the
- * future AI/action layers will consume — the UI only ever produces these.
+ * reasoning layer consumes — the UI only ever produces these.
  */
 export interface CommandRequest {
   id: string;
@@ -31,12 +39,18 @@ export interface CommandRequest {
 export interface CommandResult {
   id: string;
   status: CommandStatus;
-  /** User-safe result text (never a raw error). */
+  /** User-safe result text (the AI answer, or a safe error message). */
   text: string;
   /** The user's command, trimmed (for logs and echoes). */
   commandText?: string;
   source: CommandSource;
   quickAction?: QuickActionId;
+  /** The reasoning intent that handled this command. */
+  intent?: AIIntent;
+  /** The validated AI response (present on completed commands). */
+  ai?: AIResponse;
+  /** Whether a retry may succeed (transient errors only). */
+  retryable?: boolean;
   errorCode?: string;
   startedAt: string;
   finishedAt: string;

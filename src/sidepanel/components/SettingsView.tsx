@@ -7,8 +7,9 @@ import {
   type Theme as ThemeType,
 } from '@/shared/types/settings';
 import { Segmented } from '@/shared/components/Segmented';
+import { StatusDot } from '@/shared/components/StatusDot';
 import { Toggle } from '@/shared/components/Toggle';
-import { IconChevronLeft, IconShield } from '@/shared/components/icons';
+import { IconChevronLeft, IconShield, IconSparkle } from '@/shared/components/icons';
 
 const THEME_OPTIONS: readonly { value: ThemeType; label: string }[] = [
   { value: Theme.Dark, label: 'Dark' },
@@ -70,6 +71,38 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
           </div>
         </section>
 
+        <section className="cl-card p-4" aria-labelledby="settings-intelligence">
+          <h2 id="settings-intelligence" className="section-label">
+            Intelligence
+          </h2>
+          <div className="mt-3 flex items-center justify-between gap-4">
+            <span className="flex items-center gap-2 text-[12.5px] font-medium text-text-primary">
+              <IconSparkle size={14} className="text-accent" />
+              Reasoning provider
+            </span>
+            <span className="flex items-center gap-1.5 text-xs text-text-secondary">
+              <StatusDot tone={status?.ai.mode === 'gateway' ? 'accent' : 'success'} />
+              {status?.ai.providerLabel ?? 'Local mock provider'}
+            </span>
+          </div>
+          <p className="mt-2.5 text-[11px] leading-4 text-text-muted">
+            {status?.ai.mode === 'gateway'
+              ? 'Reasoning is routed through your configured Secure Gateway.'
+              : 'Running on the built-in local mock provider — fully functional, no setup, no secrets.'}
+          </p>
+          <div className="mt-4 border-t border-border pt-4">
+            <div className="flex items-start gap-2.5">
+              <IconShield size={15} className="mt-0.5 shrink-0 text-text-muted" />
+              <p className="text-[11.5px] leading-4.5 text-text-secondary">
+                CommandLayer never stores provider API keys or secrets. A
+                gateway connection needs only its URL; credentials stay
+                server-side. Reasoning is read-only — it can understand a
+                page, never act on it.
+              </p>
+            </div>
+          </div>
+        </section>
+
         <section className="cl-card p-4" aria-labelledby="settings-shortcut">
           <h2 id="settings-shortcut" className="section-label">
             Keyboard shortcut
@@ -96,8 +129,10 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
           <div className="mt-3 flex items-start gap-2.5">
             <IconShield size={15} className="mt-0.5 shrink-0 text-text-muted" />
             <p className="text-[11.5px] leading-4.5 text-text-secondary">
-              CommandLayer stores your preferences locally in this browser. In
-              Phase 1, no data is sent to any external service.
+              CommandLayer stores your preferences locally in this browser.
+              Reasoning requests include only the minimized page context
+              needed for your intent — form fields and their values are
+              never sent. Transcripts are session-only and never stored.
             </p>
           </div>
         </section>

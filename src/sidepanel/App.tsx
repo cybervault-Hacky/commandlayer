@@ -12,8 +12,8 @@ import { usePageContext } from '@/shared/hooks/usePageContext';
 import { usePageIntelligence } from '@/shared/hooks/usePageIntelligence';
 import { useSettings } from '@/shared/hooks/useSettings';
 import { BrandMark, IconSettings } from '@/shared/components/icons';
+import { AIResponseCard } from '@/shared/components/AIResponseCard';
 import { CommandInput } from '@/shared/components/CommandInput';
-import { CommandResultCard } from '@/shared/components/CommandResultCard';
 import { CurrentPageCard } from '@/shared/components/CurrentPageCard';
 import { PageInsightCard } from '@/shared/components/PageInsightCard';
 import { QuickActions } from '@/shared/components/QuickActions';
@@ -23,10 +23,10 @@ import { FirstRunTip } from './components/FirstRunTip';
 type PanelView = 'home' | 'settings';
 
 /**
- * The primary Phase 1 experience.
+ * Phase 3: the Side Panel is the CommandLayer intelligence interface.
  *
- * Header → hero → command input → quick actions → current page → footer.
- * All state flows through the shared hooks; no business logic lives here.
+ * Hero → ask box → quick actions → AI response → current page insight.
+ * Reasoning only: nothing here performs browser actions.
  */
 export function App() {
   const { settings, update } = useSettings();
@@ -77,12 +77,17 @@ export function App() {
 
             <section className="cl-enter mt-7" style={{ animationDelay: '40ms' }}>
               <h1 className="text-[21px] font-semibold leading-[1.3] tracking-[-0.01em] text-text-primary">
-                Your web,{' '}
+                Ask about this page.
                 <br />
                 <span className="text-text-secondary">
-                  intelligently connected.
+                  Get real intelligence.
                 </span>
               </h1>
+              <p className="mt-1.5 text-[11.5px] leading-4 text-text-muted">
+                Summaries, analysis and answers from the page you are
+                viewing. Reasoning only — CommandLayer never acts on the
+                page for you.
+              </p>
             </section>
 
             <section className="cl-enter mt-5" style={{ animationDelay: '80ms' }}>
@@ -91,11 +96,14 @@ export function App() {
                 onChange={setDraft}
                 onSubmit={handleSubmit}
                 loading={processing}
+                placeholder="What do you want to know?"
               />
-              <CommandResultCard
+              <AIResponseCard
                 phase={pipeline.phase}
                 result={pipeline.result}
                 errorMessage={pipeline.errorMessage}
+                onRetry={() => void pipeline.retry()}
+                onClear={pipeline.reset}
               />
             </section>
 

@@ -27,4 +27,9 @@ export {
   type ExtractPageRequest,
   type ExtractPageResponse,
 } from './protocol';
-export { PROFILE_SECTIONS, isPageSection, sectionsForQuickAction } from './profiles';
+export {
+  PROFILE_SECTIONS,
+  INTENT_SECTIONS,
+  isPageSection,
+  sectionsForIntent,
+} from './profiles';

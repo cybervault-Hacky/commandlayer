@@ -8,7 +8,7 @@ import {
   PageSection,
   type PageSection as Section,
 } from '@/shared/types/page';
-import type { QuickActionId } from '@/shared/constants/quickActions';
+import { AIIntent } from '@/ai/types';
 
 export const PROFILE_SECTIONS: Record<
   PageContextProfile,
@@ -41,26 +41,46 @@ export function isPageSection(value: unknown): value is Section {
 }
 
 /**
- * Section sets per quick action:
+ * Section sets per reasoning intent (Phase 3):
  * - Analyze:   metadata + headings + text + links + tables
- * - Summarize: title + headings + main text
- * - Research:  full context capture (no external research — local only)
- * - Compare:   full context (current-page foundation)
+ * - Summarize / Explain / Extract: metadata + headings + text
+ * - Answer:    metadata + headings + text + links + user selection
+ *
+ * Form data is intentionally absent from EVERY intent: forms are never
+ * captured for the reasoning pipeline.
  */
-export function sectionsForQuickAction(
-  actionId: QuickActionId,
-): readonly Section[] | null {
-  switch (actionId) {
-    case 'analyze':
-      return PROFILE_SECTIONS[PageContextProfile.Content];
-    case 'summarize':
-      return [
-        PageSection.Metadata,
-        PageSection.Headings,
-        PageSection.Text,
-      ];
-    case 'research':
-    case 'compare':
-      return null; // full capture
-  }
+export const INTENT_SECTIONS: Record<AIIntent, readonly Section[]> = {
+  [AIIntent.Summarize]: [
+    PageSection.Metadata,
+    PageSection.Headings,
+    PageSection.Text,
+  ],
+  [AIIntent.Explain]: [
+    PageSection.Metadata,
+    PageSection.Headings,
+    PageSection.Text,
+  ],
+  [AIIntent.Extract]: [
+    PageSection.Metadata,
+    PageSection.Headings,
+    PageSection.Text,
+  ],
+  [AIIntent.Analyze]: [
+    PageSection.Metadata,
+    PageSection.Headings,
+    PageSection.Text,
+    PageSection.Links,
+    PageSection.Tables,
+  ],
+  [AIIntent.Answer]: [
+    PageSection.Metadata,
+    PageSection.Headings,
+    PageSection.Text,
+    PageSection.Links,
+    PageSection.Selection,
+  ],
+};
+
+export function sectionsForIntent(intent: AIIntent): readonly Section[] {
+  return INTENT_SECTIONS[intent];
 }

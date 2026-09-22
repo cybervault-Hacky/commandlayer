@@ -195,6 +195,143 @@ body {
   color: var(--cl-text-primary);
 }
 
+/* Phase 3 — AI response card action buttons */
+.cl-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--cl-radius-sm);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--cl-text-muted);
+  cursor: pointer;
+  transition:
+    background var(--cl-duration-fast) ease,
+    color var(--cl-duration-fast) ease,
+    border-color var(--cl-duration-fast) ease;
+}
+.cl-icon-btn:hover {
+  background: var(--cl-surface-elevated);
+  border-color: var(--cl-border);
+  color: var(--cl-text-primary);
+}
+.cl-btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: var(--cl-radius-sm);
+  border: 1px solid var(--cl-border);
+  background: transparent;
+  color: var(--cl-text-secondary);
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background var(--cl-duration-fast) ease,
+    color var(--cl-duration-fast) ease;
+}
+.cl-btn-ghost:hover {
+  background: var(--cl-surface-elevated);
+  color: var(--cl-text-primary);
+}
+
+/* Phase 3 — thinking dots (processing state) */
+.cl-thinking-dots::after {
+  content: '…';
+  display: inline-block;
+  width: 1.2em;
+  text-align: left;
+  animation: cl-thinking 1.4s steps(4, end) infinite;
+}
+@keyframes cl-thinking {
+  0% {
+    content: '';
+  }
+  25% {
+    content: '.';
+  }
+  50% {
+    content: '..';
+  }
+  75%,
+  100% {
+    content: '...';
+  }
+}
+
+/* Phase 3 — safe markdown rendering (see SafeMarkdown.tsx) */
+.cl-md {
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--cl-text-secondary);
+  overflow-wrap: break-word;
+}
+.cl-md .cl-md-para {
+  margin: 0 0 8px;
+}
+.cl-md .cl-md-para:last-child {
+  margin-bottom: 0;
+}
+.cl-md .cl-md-heading {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--cl-text-primary);
+  margin: 10px 0 6px;
+}
+.cl-md .cl-md-list {
+  margin: 4px 0 8px;
+  padding-left: 1.15em;
+}
+.cl-md ul.cl-md-list {
+  list-style: disc;
+}
+.cl-md ol.cl-md-list {
+  list-style: decimal;
+}
+.cl-md .cl-md-list li {
+  margin: 3px 0;
+}
+.cl-md .cl-md-quote {
+  margin: 6px 0;
+  padding: 2px 10px;
+  border-left: 2px solid var(--cl-accent);
+  color: var(--cl-text-muted);
+}
+.cl-md .cl-md-code {
+  margin: 6px 0;
+  padding: 8px 10px;
+  border-radius: var(--cl-radius-sm);
+  background: var(--cl-surface-elevated);
+  border: 1px solid var(--cl-border);
+  font-family: var(--cl-font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-x: auto;
+  white-space: pre;
+  color: var(--cl-text-secondary);
+}
+.cl-md .cl-md-inline-code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--cl-surface-elevated);
+  border: 1px solid var(--cl-border);
+  font-family: var(--cl-font-mono, ui-monospace, monospace);
+  font-size: 0.92em;
+}
+.cl-md .cl-md-link {
+  color: var(--cl-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.cl-md .cl-md-truncated {
+  color: var(--cl-text-muted);
+  font-style: italic;
+}
+
 /* Motion */
 @keyframes cl-fade-in-up {
   from {

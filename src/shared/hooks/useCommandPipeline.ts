@@ -27,17 +27,24 @@ export interface UseCommandPipelineResult extends PipelineState {
   submitText: (text: string, quickAction?: QuickActionId) => Promise<void>;
   /** Trigger a quick action through the QUICK_ACTION pipeline. */
   submitQuickAction: (actionId: QuickActionId) => Promise<void>;
+  /** Re-run the last submitted command (enabled only when retryable). */
+  retry: () => Promise<void>;
   reset: () => void;
 }
 
 /**
  * The UI-side command pipeline. Free text and quick actions share one state
  * machine and both travel through the background dispatcher, so behavior is
- * identical to what future AI phases will replace.
+ * identical across surfaces.
  *
- * `onResult` is invoked (in an async callback, after state settles) with
- * every terminal result, so surfaces can react — e.g. the Command Center
- * session log — without effects.
+ * Phase 3 protections:
+ * - STALE GUARD: each run increments a sequence; late responses from
+ *   superseded runs are dropped silently (no state change, no onResult).
+ * - RETRY: the last submission can be re-run for transient (retryable)
+ *   failures.
+ *
+ * `onResult` is invoked with every NON-STALE terminal result so surfaces
+ * can react — e.g. the Command Center session transcript — without effects.
  */
 export function useCommandPipeline(
   source: CommandSource,
@@ -53,11 +60,24 @@ export function useCommandPipeline(
     onResultRef.current = onResult;
   }, [onResult]);
 
+  /** Monotonic run sequence for stale-response protection. */
+  const runSeqRef = useRef(0);
+  /** Re-executable closure of the last submission (for retry). */
+  const lastExecuteRef = useRef<
+    (() => Promise<MessageResult<CommandResult>>) | null
+  >(null);
+
   const run = useCallback(async (
     execute: () => Promise<MessageResult<CommandResult>>,
   ) => {
+    const seq = ++runSeqRef.current;
+    lastExecuteRef.current = execute;
     setState({ phase: 'processing', result: null, errorMessage: null });
     const result = await execute();
+
+    // Stale guard: a newer submission superseded this one while it was
+    // in flight. Its result must never reach state or onResult.
+    if (seq !== runSeqRef.current) return;
 
     let next: PipelineState;
     if (result.ok) {
@@ -110,7 +130,15 @@ export function useCommandPipeline(
     [run, source],
   );
 
+  const retry = useCallback(async () => {
+    const execute = lastExecuteRef.current;
+    if (!execute) return;
+    await run(execute);
+  }, [run]);
+
   const reset = useCallback(() => {
+    runSeqRef.current += 1;
+    lastExecuteRef.current = null;
     setState({ phase: 'idle', result: null, errorMessage: null });
   }, []);
 
@@ -120,6 +148,7 @@ export function useCommandPipeline(
     errorMessage: state.errorMessage,
     submitText,
     submitQuickAction,
+    retry,
     reset,
   };
 }

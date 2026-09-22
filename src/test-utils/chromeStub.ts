@@ -56,7 +56,7 @@ export function createChromeStub(options: {
   return {
     runtime: {
       id: 'test-extension-id',
-      getManifest: () => ({ version: version ?? '0.1.0' }),
+      getManifest: () => ({ version: version ?? '0.2.0' }),
       getURL: (path: string) => `chrome-extension://test-extension-id/${path}`,
     },
     tabs: {

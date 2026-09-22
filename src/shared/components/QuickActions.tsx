@@ -5,16 +5,16 @@ import {
 import { cn } from '@/shared/utilities/cn';
 import {
   IconAnalyze,
-  IconCompare,
-  IconResearch,
+  IconExplain,
+  IconExtract,
   IconSummarize,
 } from './icons';
 
 const ACTION_ICON: Record<QuickAction['id'], typeof IconAnalyze> = {
   analyze: IconAnalyze,
-  research: IconResearch,
   summarize: IconSummarize,
-  compare: IconCompare,
+  explain: IconExplain,
+  extract: IconExtract,
 };
 
 export interface QuickActionsProps {

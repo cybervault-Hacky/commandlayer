@@ -2,6 +2,7 @@ import {
   APP_VERSION,
 } from '@/shared/constants/app';
 import { getGrantedPermissions } from '@/permissions';
+import { getAIStatusInfo } from '@/ai';
 import type {
   ExtensionStatus,
   RuntimeEnvironment,
@@ -24,6 +25,7 @@ export async function getExtensionStatus(): Promise<ExtensionStatus> {
       : 'preview';
 
   const permissionsGranted = await getGrantedPermissions();
+  const ai = getAIStatusInfo();
 
-  return { version, environment, ready: true, permissionsGranted };
+  return { version, environment, ready: true, permissionsGranted, ai };
 }

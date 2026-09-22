@@ -1,17 +1,56 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { JSDOM } from 'jsdom';
 import { MessageType } from '@/shared/constants/messages';
 import {
   createChromeStub,
   installChromeStub,
   uninstallChromeStub,
+  type ChromeStub,
 } from '@/test-utils/chromeStub';
 import { __resetStorageBackendForTests } from '@/storage/backend';
 import { __resetTransportForTests } from '@/shared/messaging/transport';
-import { setMockProviderLatency } from '@/ai/mockProvider';
+import { resetMockProvider, setMockProviderLatency } from '@/ai/mockProvider';
+import { extractPageContext } from '@/page-intelligence';
+import { isExtractPageRequest } from '@/page-intelligence/protocol';
+import type { CommandResult } from '@/shared/types/command';
+import type { ExtensionStatus } from '@/shared/types/status';
+import type { PageContext } from '@/shared/types/page';
 import {
   handleBackgroundMessage,
   isTrustedSender,
 } from '../handlers';
+
+const REASONING_PAGE_HTML = `<!doctype html>
+<html lang="en">
+<head><title>Orbital Mechanics Primer</title></head>
+<body>
+  <article>
+    <h1>Orbital Mechanics Primer</h1>
+    <h2>Kepler's Laws</h2>
+    <p>Planets sweep equal areas in equal times.</p>
+    <p>Orbits are ellipses with the focus at the primary.</p>
+    <a href="https://example.org/kepler">Kepler reference</a>
+  </article>
+</body>
+</html>`;
+
+/** Simulate the browser delivering extraction requests to the page. */
+function wirePage(stub: ChromeStub, html: string, url: string): void {
+  const dom = new JSDOM(html, { url });
+  stub.tabs.sendMessage.mockImplementation(
+    async (_tabId: number, message: unknown) => {
+      if (!isExtractPageRequest(message)) {
+        throw new Error(
+          'Could not establish connection. Receiving end does not exist.',
+        );
+      }
+      const context: PageContext = extractPageContext(dom.window.document, {
+        sections: message.sections,
+      });
+      return { ok: true, context };
+    },
+  );
+}
 
 const TRUSTED = { id: 'test-extension-id' };
 
@@ -24,6 +63,7 @@ describe('background message handler', () => {
     installChromeStub(createChromeStub());
     __resetStorageBackendForTests();
     __resetTransportForTests();
+    resetMockProvider();
     setMockProviderLatency(0);
   });
 
@@ -39,7 +79,26 @@ describe('background message handler', () => {
     );
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.data).toEqual({ pong: true, version: '0.1.0' });
+      expect(result.data).toEqual({ pong: true, version: '0.2.0' });
+    }
+  });
+
+  it('answers GET_EXTENSION_STATUS with non-secret AI provider info', async () => {
+    const result = await handleBackgroundMessage(
+      rawMessage(MessageType.GET_EXTENSION_STATUS),
+      TRUSTED,
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const status = result.data as ExtensionStatus;
+      expect(status.ready).toBe(true);
+      expect(status.ai).toMatchObject({
+        providerId: 'local-mock',
+        mode: 'mock',
+        gatewayConfigured: false,
+      });
+      // No secrets in status, ever.
+      expect(JSON.stringify(status)).not.toMatch(/key|secret|token/i);
     }
   });
 
@@ -91,7 +150,17 @@ describe('background message handler', () => {
     }
   });
 
-  it('runs a valid command through the mock pipeline', async () => {
+  it('runs a valid command through the reasoning engine (wired page)', async () => {
+    const stub = createChromeStub({
+      activeTab: {
+        id: 1,
+        title: 'Orbital Mechanics Primer',
+        url: 'https://example.org/orbits',
+      },
+    });
+    installChromeStub(stub);
+    wirePage(stub, REASONING_PAGE_HTML, 'https://example.org/orbits');
+
     const result = await handleBackgroundMessage(
       rawMessage(MessageType.COMMAND_SUBMIT, {
         text: 'Summarize this page',
@@ -101,14 +170,47 @@ describe('background message handler', () => {
     );
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.data).toMatchObject({ status: 'completed' });
+      const data = result.data as CommandResult;
+      expect(data.status).toBe('completed');
+      expect(data.intent).toBe('SUMMARIZE');
+      expect(data.ai).toBeDefined();
+      expect(data.ai?.requestId).toBe(data.id);
+      expect(data.ai?.provider).toBe('local-mock');
+      expect(data.ai?.answer).toContain('Orbital Mechanics Primer');
     }
   });
 
-  it('runs a valid quick action through the mock pipeline', async () => {
+  it('fails a command honestly when no page content is reachable', async () => {
+    const result = await handleBackgroundMessage(
+      rawMessage(MessageType.COMMAND_SUBMIT, {
+        text: 'Summarize this page',
+        source: 'sidepanel',
+      }),
+      TRUSTED,
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data).toMatchObject({
+        status: 'failed',
+        errorCode: 'AI_PAGE_UNAVAILABLE',
+      });
+    }
+  });
+
+  it('runs a valid quick action through the reasoning engine', async () => {
+    const stub = createChromeStub({
+      activeTab: {
+        id: 1,
+        title: 'Orbital Mechanics Primer',
+        url: 'https://example.org/orbits',
+      },
+    });
+    installChromeStub(stub);
+    wirePage(stub, REASONING_PAGE_HTML, 'https://example.org/orbits');
+
     const result = await handleBackgroundMessage(
       rawMessage(MessageType.QUICK_ACTION, {
-        actionId: 'research',
+        actionId: 'explain',
         source: 'sidepanel',
       }),
       TRUSTED,
@@ -117,7 +219,8 @@ describe('background message handler', () => {
     if (result.ok) {
       expect(result.data).toMatchObject({
         status: 'completed',
-        quickAction: 'research',
+        quickAction: 'explain',
+        intent: 'EXPLAIN',
       });
     }
   });

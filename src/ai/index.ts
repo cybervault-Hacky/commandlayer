@@ -1,17 +1,25 @@
-import {
-  ErrorCode,
-  USER_ERROR_MESSAGES,
-} from '@/shared/constants/errors';
-import { CommandLayerError } from '@/shared/security/errors';
-import { MockAIProvider } from './mockProvider';
-import type { AIProvider } from './types';
+/**
+ * Phase 3 — provider registry.
+ *
+ * Two providers exist:
+ * - local-mock: deterministic, offline, zero-config default
+ * - secure-gateway: HTTPS gateway adapter (active only when a valid
+ *   gateway URL is configured; still requires no secrets in the extension)
+ *
+ * The UI never calls providers directly — requests go through the
+ * client (client.ts), which adds validation, timeout, cancellation,
+ * and response validation.
+ */
+import { gatewayAIProvider } from './providers/gatewayProvider';
+import { mockAIProvider } from './mockProvider';
+import type { AIProvider, AIStatusInfo } from './types';
 
 export * from './types';
-export { MockAIProvider, MOCK_RESPONSE_TEXT } from './mockProvider';
+export { mockAIProvider } from './mockProvider';
+export { gatewayAIProvider } from './providers/gatewayProvider';
 
 const providers = new Map<string, AIProvider>();
 
-/** Register a provider (future phases register real ones here). */
 export function registerAIProvider(provider: AIProvider): void {
   providers.set(provider.id, provider);
 }
@@ -20,22 +28,32 @@ export function getAIProvider(id: string): AIProvider | undefined {
   return providers.get(id);
 }
 
-export const DEFAULT_AI_PROVIDER_ID = 'local-mock';
-
 /**
- * Resolve the active provider. Phase 1 registers only the local mock, so the
- * extension keeps working with zero external dependencies.
+ * Resolve the active provider: the gateway when configured and
+ * available, otherwise the local mock (the extension must stay fully
+ * functional with zero configuration).
  */
 export function getActiveAIProvider(): AIProvider {
-  const provider = providers.get(DEFAULT_AI_PROVIDER_ID);
-  if (!provider || !provider.isAvailable()) {
-    throw new CommandLayerError(
-      ErrorCode.AI_UNAVAILABLE,
-      USER_ERROR_MESSAGES[ErrorCode.AI_UNAVAILABLE],
-    );
-  }
-  return provider;
+  const gateway = providers.get(gatewayAIProvider.id);
+  if (gateway && gateway.isAvailable()) return gateway;
+  const mock = providers.get(mockAIProvider.id);
+  if (mock && mock.isAvailable()) return mock;
+  // The mock is always available; this is defensive only.
+  return mockAIProvider;
 }
 
-// Phase 1: local mock only.
-registerAIProvider(new MockAIProvider());
+/** Non-secret provider status for the Settings UI. */
+export function getAIStatusInfo(): AIStatusInfo {
+  const gatewayConfigured =
+    providers.has(gatewayAIProvider.id) && gatewayAIProvider.isAvailable();
+  const active = getActiveAIProvider();
+  return {
+    providerId: active.id,
+    providerLabel: active.displayName,
+    mode: active.mode,
+    gatewayConfigured,
+  };
+}
+
+registerAIProvider(mockAIProvider);
+registerAIProvider(gatewayAIProvider);

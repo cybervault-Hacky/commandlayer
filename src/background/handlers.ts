@@ -28,8 +28,9 @@ import {
 import { getSettings, updateSettings } from '@/storage/settings';
 import {
   isPageSection,
-  sectionsForQuickAction,
+  sectionsForIntent,
 } from '@/page-intelligence/profiles';
+import { resolveIntent, intentForQuickAction } from '@/ai/intents';
 import type {
   CommandSource,
   QuickActionId,
@@ -189,8 +190,16 @@ async function dispatchMessage(message: MessageEnvelope): Promise<unknown> {
         );
       }
       // Every command is a user-initiated request → one on-demand capture
-      // of the active page for the command pipeline (safe on all failures).
-      const context = await getPageContext();
+      // of the active page. The capture is scoped to the sections the
+      // resolved intent actually needs (forms are never captured for AI).
+      const intent =
+        payload.quickAction !== undefined
+          ? intentForQuickAction(payload.quickAction) ??
+            resolveIntent(payload.text)
+          : resolveIntent(payload.text);
+      const context = await getPageContext({
+        sections: [...sectionsForIntent(intent)],
+      });
       const request = buildCommandRequest({
         text: payload.text,
         source: payload.source,
@@ -208,9 +217,17 @@ async function dispatchMessage(message: MessageEnvelope): Promise<unknown> {
           USER_ERROR_MESSAGES[ErrorCode.INVALID_PAYLOAD],
         );
       }
-      // Each quick action requests only the sections it needs.
-      const sections = sectionsForQuickAction(payload.actionId);
-      const context = await getPageContext({ sections });
+      // Each quick action requests only the sections its intent needs.
+      const intent = intentForQuickAction(payload.actionId);
+      if (!intent) {
+        throw new CommandLayerError(
+          ErrorCode.INVALID_PAYLOAD,
+          USER_ERROR_MESSAGES[ErrorCode.INVALID_PAYLOAD],
+        );
+      }
+      const context = await getPageContext({
+        sections: [...sectionsForIntent(intent)],
+      });
       const request = buildQuickActionRequest(
         payload.actionId,
         payload.source,

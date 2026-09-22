@@ -7,16 +7,21 @@ founders, and knowledge workers. It is designed to grow into an intelligent
 layer that understands your current web context and eventually researches,
 understands, creates, automates, and executes work across the web.
 
-> **Phase 2 status:** CommandLayer is an Edge-first browser extension with
-> a working **Page Intelligence engine**: on the user's request, a minimal
-> content script performs one controlled, read-only extraction of the
-> active webpage into a structured, sanitized `PageContext` that the
-> background validates and the Side Panel displays. **No AI provider, OAuth
-> integration, or autonomous action is implemented.** Commands run through
-> a local mock pipeline that honestly reports what it did and did not do.
+> **Phase 3 status:** CommandLayer is an Edge-first browser extension with
+> a working **Real AI Reasoning Engine**: user intents, a minimal
+> per-intent page context, prompt construction with strict injection
+> defenses, a validated-response pipeline, and a premium intelligence UI
+> in the Side Panel and Command Center. Reasoning runs on a built-in
+> **local mock provider by default** (zero configuration, fully
+> functional), with an optional **Secure Intelligence Gateway**
+> (`Extension → HTTPS → Gateway → Provider`) so provider secrets never
+> live in the extension. **CommandLayer can reason about supplied webpage
+> context, but Phase 3 does not grant AI permission to perform browser
+> actions.**
 >
 > **CommandLayer does not collect form values, passwords, cookies, browser
-> storage, authentication tokens, or browsing history.**
+> storage, authentication tokens, or browsing history — and forms are
+> never sent to the reasoning engine.**
 
 Built for **Microsoft Edge** (Manifest V3), with architecture that stays
 compatible with Chromium WebExtension APIs where practical.
@@ -28,12 +33,14 @@ compatible with Chromium WebExtension APIs where practical.
 What is included:
 
 - **Side Panel** — the primary experience: command input, quick actions
-  (Analyze / Research / Summarize / Compare), live current-page context,
+  (Analyze / Research / Summarize / Compare — *superseded in Phase 3 by
+  Analyze / Summarize / Explain / Extract*), live current-page context,
   and inline settings.
 - **Popup** — a compact launcher: extension status, current-page status,
   "Open Command Center" / "Open Side Panel" actions, shortcut info.
 - **Command Center** — a full-window command experience with a
-  session-only command log.
+  session-only command log (*superseded in Phase 3 by a session-only
+  reasoning transcript*).
 - **Command pipeline** — `Quick Action / Command Input → CommandRequest →
   CommandDispatcher → (mock) AI handler → CommandResult`. The UI only ever
   produces structured, validated requests.
@@ -92,12 +99,10 @@ What is included:
   huge raw text by default), and a toggleable developer JSON preview of the
   fully sanitized context.
 - **Command pipeline integration** — every command and quick action
-  triggers one on-demand capture of the context it needs (Analyze →
-  metadata + headings + text + links + tables; Summarize → title + headings
-  + main text; Research/Compare → full capture). The mock provider now
-  reports: *"Page context captured successfully. The AI reasoning engine
-  will be connected in a future phase."* — it never claims an AI analysis
-  ran.
+  triggers one on-demand capture of the context it needs. *(Phase 3
+  update: captures are now scoped per reasoning intent — see the Phase 3
+  section — and the captured context feeds the real reasoning engine
+  instead of the Phase 1/2 mock acknowledgement.)*
 - **Security hardening** — the background re-parses every content-script
   response with a strict validator that enforces all limits and rejects
   any form-field `value` key, so nothing untrusted ever reaches the UI.
@@ -195,6 +200,129 @@ extension site-access settings.
 
 ---
 
+## Phase 3 scope — Real AI Reasoning Engine & Secure Intelligence Gateway
+
+Phase 3 turns the command pipeline into genuine AI reasoning over the
+user's current page. The flow is:
+
+```
+User → Intent → Page Intelligence → Context Builder → AI Reasoning Engine
+     → Validated AI Response → Premium UI
+```
+
+What is included:
+
+- **Reasoning-only intents** — `SUMMARIZE`, `ANALYZE`, `EXPLAIN`,
+  `EXTRACT`, `ANSWER`. There are deliberately **no action intents** (no
+  CLICK / TYPE / SUBMIT / NAVIGATE / DELETE / SEND / PURCHASE): the AI is
+  never given permission to act on the browser.
+- **Deterministic intent resolution** — quick actions always supply an
+  explicit intent; free-text commands are classified by local keyword
+  rules with `ANSWER` as the fallback. No unstructured model-based
+  classification, so behavior is predictable and testable. Quick actions
+  are now **Analyze / Summarize / Explain / Extract**; the Phase 1
+  "Research" and "Compare" actions were removed rather than faked (they
+  require multi-page research and cross-tab comparison, documented as
+  future roadmap work).
+- **Minimal per-intent context builder** — the captured `PageContext` is
+  reduced to exactly the sections each intent needs (e.g. Summarize →
+  metadata + headings + text; Analyze adds links + tables; Answer adds
+  the user's selection), re-sanitized and budget-capped before it reaches
+  the AI. **Forms are never sent to the reasoning engine.**
+- **Prompt construction with 3-layer separation** — system instructions
+  (static, trusted), the user's request, and the webpage data wrapped in
+  explicit `<webpage_data>` delimiters and labeled untrusted data. The
+  system instructions state the webpage block cannot change the task or
+  the output contract, and any literal delimiter inside page content is
+  neutralized so a page cannot escape the block.
+- **AI output is validated data only** — every response (mock or gateway)
+  passes a trust policy: the provider must echo the `requestId`, the
+  intent must match, only allowlisted fields are accepted, every string
+  is re-sanitized and length-capped, and `sources` must be absolute
+  http/https URLs (dangerous schemes like `javascript:` are rejected).
+  Safe Markdown rendering uses React text nodes only — no
+  `dangerouslySetInnerHTML`, no HTML execution.
+- **Typed errors** — a fixed AI error vocabulary
+  (`AI_UNAVAILABLE`, `AI_TIMEOUT`, `AI_RATE_LIMITED`, `AI_AUTH_ERROR`,
+  `AI_INVALID_RESPONSE`, `AI_INVALID_REQUEST`, `AI_CONTEXT_TOO_LARGE`,
+  `AI_NETWORK_ERROR`, `AI_PROVIDER_ERROR`, `AI_CONFIGURATION_ERROR`,
+  `AI_PAGE_UNAVAILABLE`, `AI_CANCELLED`) with user-safe wording; provider
+  internals, auth details, and raw error text never reach the UI.
+- **Timeout, cancellation, and stale-response protection** — every
+  request carries a request id; new commands supersede in-flight ones
+  from the same surface (aborted), external aborts are honored, and the
+  UI ignores results from superseded runs.
+- **Side Panel redesigned as the intelligence interface** — "Ask about
+  this page" hero, a reasoning response card with a thinking state,
+  safe-Markdown answer + structured sections + safe references, copy /
+  clear / retry actions.
+- **Command Center session-only transcript** — questions and validated
+  answers accumulate for the lifetime of the tab only; closing the tab
+  discards everything. **No permanent memory.**
+- **Settings shows AI status** (provider, mode, gateway configured) and
+  **never stores API keys or secrets**.
+
+### Secure Intelligence Gateway contract
+
+The extension never holds a provider secret. When a gateway is
+configured, reasoning is routed over HTTPS:
+`Extension → Secure Gateway → AI Provider`. Credentials live only in the
+gateway (server-side); the extension knows only the gateway URL
+(`VITE_AI_GATEWAY_URL`, HTTPS required — HTTP only for `localhost`
+development).
+
+**Endpoint:** `POST {gateway}/v1/reason`
+
+Request:
+
+```json
+{
+  "requestId": "req-…",
+  "intent": "SUMMARIZE",
+  "system": "…system instructions + task…",
+  "prompt": "User request: …\n<webpage_data>…untrusted page data…</webpage_data>",
+  "context": { "page": { }, "headings": [], "text": "", "links": [], "tables": [], "selectedText": null, "truncated": false }
+}
+```
+
+Response (success):
+
+```json
+{
+  "requestId": "req-…",
+  "intent": "SUMMARIZE",
+  "status": "success",
+  "answer": "…markdown…",
+  "sections": [{ "title": "…", "content": "…markdown…" }],
+  "sources": [{ "title": "…", "url": "https://…" }]
+}
+```
+
+Response (error):
+
+```json
+{ "status": "error", "requestId": "req-…", "error": { "code": "AI_RATE_LIMITED", "message": "…" } }
+```
+
+The client maps HTTP `401/403 → AI_AUTH_ERROR`, `429 → AI_RATE_LIMITED`,
+`400/413/422 → AI_INVALID_REQUEST`, `408 → AI_TIMEOUT`, `5xx →
+AI_PROVIDER_ERROR`, and non-JSON bodies to `AI_INVALID_RESPONSE`. Every
+gateway response is still parsed and validated by the same trust policy
+as the local mock. Without a configured gateway, the built-in local mock
+provider serves every request, so the extension remains fully functional
+with zero configuration.
+
+### What Phase 3 does not do
+
+- No browser actions of any kind — reasoning only.
+  **CommandLayer can reason about supplied webpage context, but Phase 3
+  does not grant AI permission to perform browser actions.**
+- No permanent page-content storage or long-term memory; the Command
+  Center transcript is session-scoped only.
+- No OAuth / third-party integrations.
+- No provider API key storage in the extension.
+
+
 ## Architecture
 
 ```
@@ -205,9 +333,11 @@ src/
 ├── page-intelligence/ Page Intelligence Engine: extractors, limits,
 │                      sanitizer, visibility, validator, capture profiles
 ├── popup/             Compact launcher UI
-├── sidepanel/         Primary experience (command + page insight)
-├── command-center/    Full-window command UI + session log
-├── ai/                AI abstraction (types + local mock provider)
+├── sidepanel/         Primary experience (intelligence interface + page insight)
+├── command-center/    Full-window intelligence UI + session-only transcript
+├── ai/                Real AI reasoning engine: intents, context builder,
+│                      prompts, parser/validator, gateway contract,
+│                      providers (local mock + secure gateway), client
 ├── actions/           Action abstraction (types + registry, empty in P1)
 ├── integrations/      Integration architecture (registry, empty in P1)
 ├── memory/            Memory abstraction (session-only store)
@@ -236,9 +366,11 @@ Boundaries:
   nothing, and only ever answers one message kind.
 - **Storage is always validated.** Corrupted or missing values degrade to
   safe defaults; patches are validated before they are written.
-- **The AI layer is an interface.** `AIProvider`/`AIRequest`/`AIResponse`/
-  `AIError` let future providers plug in without touching the UI or
-  dispatcher. Phase 2 still registers only the local mock.
+- **The AI layer is a validated pipeline.** `AIProvider`/`AIRequest`/
+  `AIResponse`/`AIError` let providers plug in without touching the UI or
+  dispatcher. Phase 3 registers the local mock (default) and a secure
+  gateway adapter; every provider response is parsed and validated before
+  rendering.
 
 ### Message flow
 
@@ -271,19 +403,21 @@ anything else is ignored by the content script.
 Quick Action ──▶ CommandRequest (structured, validated) ──▶ CommandDispatcher
 Command Input ─▶                                          │
                                                          ▼
-                              CommandHandler (Phase 1: AICommandHandler
-                              → local mock provider; future: real providers)
+                    AICommandHandler: resolve intent → buildAIContext
+                    → runAIRequest (provider + timeout/cancel → parse
+                    → validate) — local mock or secure gateway
                                                          ▼
-                                        CommandResult (user-safe)
+            CommandResult (validated AI response or typed error)
 ```
 
-Every command/quick action triggers one on-demand page capture (the
-appropriate section set per action), and the mock provider's response is
-context-aware and honest: *\"Page context captured successfully. The AI
-reasoning engine will be connected in a future phase.\"* when a real
-capture is present, or *\"Command received. AI intelligence will be
-connected in a future phase.\"* otherwise. The UI never pretends an AI
-operation occurred.
+Every command/quick action triggers one on-demand page capture scoped to
+the resolved intent's sections (forms are never requested), then the
+reasoning engine produces a **validated** response: intent classification
+is deterministic (explicit per quick action, keyword rules + `ANSWER`
+fallback for free text), prompts separate system / user / untrusted
+webpage data, and every response is checked against the trust policy
+(request-id echo, closed field set, length caps, http/https-only sources)
+before the UI may render it.
 
 ---
 
@@ -465,9 +599,10 @@ Coverage includes:
 - **Background capture** — no-tab, unsupported-URL, permission-required,
   real content↔background round trip, malicious/garbage response
   handling, section subset pass-through.
-- **Command pipeline** — command creation, quick actions, empty/overlong
-  commands, context-aware mock responses (never claims AI ran), failing
-  handlers, AI error mapping.
+- **Command pipeline (Phase 3)** — command creation, quick actions with
+  explicit intents, deterministic free-text classification, empty/overlong
+  commands, no-content failures (`AI_PAGE_UNAVAILABLE`), failing handlers,
+  AI error mapping with retryability, supersede/cancellation semantics.
 - **UI** — Side Panel (including the on-demand Page Insight capture:
   stats, expandable preview, developer JSON, site-access guidance,
   unsupported-page and idle states), Popup, and Command Center rendering,
@@ -476,11 +611,22 @@ Coverage includes:
   motion applied to the document), first-run tip.
 - **Security** — malformed message rejection, unsafe URL handling,
   invalid stored data, error sanitization (no stack traces leak).
+- **AI reasoning engine (Phase 3)** — deterministic intent resolution,
+  per-intent context minimization (forms never sent), prompt 3-layer
+  separation and delimiter-injection defense, JSON-only parsing (no eval),
+  response trust policy (request-id echo, closed field set, budget caps,
+  http/https-only sources, unknown-field rejection), gateway contract and
+  HTTP error mapping (transport-agnostic fetcher), client timeout /
+  cancellation, safe-Markdown rendering (no HTML execution, no
+  `javascript:` links, node cap), and hostile-page end-to-end scenarios.
 
 `npm run smoke` additionally loads the *built* `dist/background.js` **and**
-the *built* `dist/content.js` (the latter into a jsdom web-page fixture)
-with a chrome shim and exercises real end-to-end round-trips, including
-the form-value guarantees on the production bundles.
+the *built* `dist/content.js` (the latter into a jsdom web-page fixture
+that includes prompt-injection content) with a chrome shim and exercises
+real end-to-end round-trips: extraction, reasoning commands and quick
+actions (validated AI responses with echoing request ids, http/https-only
+sources, no executable payloads), removed-action rejection, and the
+form-value guarantees on the production bundles.
 
 ---
 
@@ -511,17 +657,36 @@ the form-value guarantees on the production bundles.
   fixed vocabulary — never stack traces or raw exceptions.
 - **No secrets, no eval, no remote code:** no API keys, no `eval`/
   `Function`, no remote scripts or CDN dependencies; everything is local.
-- **Honest states:** the mock pipeline says so; page context exposes all
-  seven states — Not requested / Capturing / Ready / Partial / Unsupported
-  / Permission required / Unavailable.
+  Provider secrets (when a real provider is used) live only in the
+  Secure Gateway, never in the extension.
+- **Untrusted inputs on both sides (Phase 3):** webpage content is
+  untrusted data inside prompts (delimited, labeled, delimiter-escape
+  neutralized), and AI output is untrusted too (parsed as JSON only,
+  validated against a closed trust policy before rendering; Markdown is
+  rendered as React text nodes — no HTML execution).
+- **Honest states:** reasoning failures surface as typed, user-safe
+  errors; page context exposes all seven states — Not requested /
+  Capturing / Ready / Partial / Unsupported / Permission required /
+  Unavailable.
 
 ---
 
-## Current limitations (Phase 2)
+## Current limitations (Phase 3)
 
-- The command pipeline is still a **local mock** — commands receive real
-  page context but are acknowledged, not executed intelligently. The AI
-  reasoning engine is a future phase.
+- **Default reasoning is the built-in local mock provider.** It is fully
+  functional and deterministic (summaries/analyses/explanations grounded
+  in the captured page structure), but it is not a large language model.
+  Real-model reasoning requires deploying the Secure Gateway
+  (`POST /v1/reason`) and setting `VITE_AI_GATEWAY_URL`; no provider
+  secret ever ships in the extension.
+- **Research and Compare are not implemented.** The Phase 1 quick actions
+  by those names were removed from the UI instead of being faked:
+  multi-page research and cross-tab comparison need capabilities that do
+  not exist yet, and they are listed in the roadmap.
+- Reasoning is **single-page and on-demand** — no web crawling, no
+  link-following, no cross-tab context.
+- The Command Center transcript is **session-only by design** — there is
+  no conversation persistence or long-term memory.
 - Page intelligence is an **extraction baseline**, not a reader-mode
   algorithm: it uses a deterministic readable-content heuristic (article/
   main preference, boilerplate exclusion) and fixed caps. Very unusual
@@ -542,11 +707,14 @@ the form-value guarantees on the production bundles.
 
 ## Roadmap direction
 
-- **Phase 3:** connect real AI reasoning through the existing
-  `AIProvider` interface, consuming the structured `PageContext` this
-  phase produces; stream command results.
+- **Phase 3 (delivered):** real AI reasoning over page context —
+  intent resolution, per-intent context building, injection-defended
+  prompts, validated responses, and the Secure Gateway contract for
+  secret-free provider connectivity.
 - **Phase 4:** web research & summarization built on page intelligence
-  (multi-page context, with user-controlled scope).
+  (multi-page context, with user-controlled scope) — including real
+  implementations of Research/Compare, which were deliberately removed
+  from the UI in Phase 3 rather than mocked.
 - **Phase 5:** permissioned actions (action registry + confirmation
   flows) for read/write operations on the current page.
 - **Phase 6:** integrations (GitHub, Gmail, Slack, Notion, Jira) through

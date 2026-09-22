@@ -1,13 +1,18 @@
 /**
- * Quick actions are the Phase 1 entry points into the command pipeline.
- * They build structured CommandRequests (see @/commands) — they never
- * perform web operations themselves.
+ * Quick actions are the entry points into the command pipeline.
+ *
+ * Phase 3: every quick action maps 1:1 to a real reasoning intent
+ * (see @/ai/intents) and runs through the AI reasoning engine. The
+ * Phase 1 "Research" and "Compare" actions were removed instead of
+ * being faked — they need capabilities that do not exist yet
+ * (multi-page research, cross-tab comparison) and are documented as
+ * future roadmap items in the README.
  */
 export const QuickActionId = {
   Analyze: 'analyze',
-  Research: 'research',
   Summarize: 'summarize',
-  Compare: 'compare',
+  Explain: 'explain',
+  Extract: 'extract',
 } as const;
 
 export type QuickActionId = (typeof QuickActionId)[keyof typeof QuickActionId];
@@ -28,22 +33,22 @@ export const QUICK_ACTIONS: readonly QuickAction[] = [
     template: 'Analyze the current page',
   },
   {
-    id: 'research',
-    label: 'Research',
-    description: 'Dig into the details',
-    template: 'Research the current page',
-  },
-  {
     id: 'summarize',
     label: 'Summarize',
     description: 'Get the key points',
     template: 'Summarize the current page',
   },
   {
-    id: 'compare',
-    label: 'Compare',
-    description: 'Weigh things side by side',
-    template: 'Compare the current page',
+    id: 'explain',
+    label: 'Explain',
+    description: 'Plain-language explanation',
+    template: 'Explain the current page',
+  },
+  {
+    id: 'extract',
+    label: 'Extract',
+    description: 'Pull out key information',
+    template: 'Extract the important information from this page',
   },
 ] as const satisfies readonly QuickAction[];
 

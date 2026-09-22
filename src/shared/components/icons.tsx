@@ -149,12 +149,26 @@ export function IconAnalyze(props: IconProps) {
   );
 }
 
-export function IconResearch(props: IconProps) {
+export function IconExplain(props: IconProps) {
   const { size = 16, ...rest } = props;
   return (
     <svg {...svgProps(size, rest)}>
-      <circle cx="12" cy="12" r="9" />
-      <path d="m15.5 8.5-2 5-5 2 2-5 5-2Z" />
+      <path d="M12 3a7 7 0 0 0-4 12.7V18a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-2.3A7 7 0 0 0 12 3Z" />
+      <path d="M9.5 21h5" />
+      <path d="M12 8.5v3.5" />
+      <path d="M12 15h.01" />
+    </svg>
+  );
+}
+
+export function IconExtract(props: IconProps) {
+  const { size = 16, ...rest } = props;
+  return (
+    <svg {...svgProps(size, rest)}>
+      <path d="M4 4h16" />
+      <path d="M4 9h16" />
+      <path d="m9 15 3 3 3-3" />
+      <path d="M12 13v5" />
     </svg>
   );
 }
@@ -170,12 +184,34 @@ export function IconSummarize(props: IconProps) {
   );
 }
 
-export function IconCompare(props: IconProps) {
+export function IconSparkle(props: IconProps) {
   const { size = 16, ...rest } = props;
   return (
     <svg {...svgProps(size, rest)}>
-      <rect x="3" y="5" width="10" height="14" rx="1.5" />
-      <rect x="13" y="9" width="8" height="10" rx="1.5" />
+      <path d="M12 4.5 13.8 9l4.5 1.8-4.5 1.8L12 17.1l-1.8-4.5-4.5-1.8L10.2 9 12 4.5Z" />
+      <path d="M19 3.5v3M17.5 5h3" />
+    </svg>
+  );
+}
+
+export function IconCopy(props: IconProps) {
+  const { size = 16, ...rest } = props;
+  return (
+    <svg {...svgProps(size, rest)}>
+      <rect x="9" y="9" width="11" height="11" rx="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </svg>
+  );
+}
+
+export function IconTrash(props: IconProps) {
+  const { size = 16, ...rest } = props;
+  return (
+    <svg {...svgProps(size, rest)}>
+      <path d="M4 7h16" />
+      <path d="M10 11v6M14 11v6" />
+      <path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12" />
+      <path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2" />
     </svg>
   );
 }
