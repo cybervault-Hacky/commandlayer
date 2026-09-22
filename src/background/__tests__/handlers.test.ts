@@ -82,7 +82,7 @@ describe('background message handler', () => {
     );
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.data).toEqual({ pong: true, version: '0.3.0' });
+      expect(result.data).toEqual({ pong: true, version: '0.4.0' });
     }
   });
 

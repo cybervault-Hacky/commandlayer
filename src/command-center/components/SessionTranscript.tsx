@@ -1,7 +1,10 @@
 import type { CommandResult } from '@/shared/types/command';
+import { WorkflowStatus } from '@/workflows/types';
 import { AIResponseCard } from '@/shared/components/AIResponseCard';
 import { ActionPreviewCard } from '@/shared/components/ActionPreviewCard';
 import { ActionProgressCard } from '@/shared/components/ActionProgressCard';
+import { WorkflowPreviewCard } from '@/shared/components/WorkflowPreviewCard';
+import { WorkflowProgressCard } from '@/shared/components/WorkflowProgressCard';
 import { IconSparkle } from '@/shared/components/icons';
 
 export interface TranscriptUserTurn {
@@ -82,7 +85,25 @@ export function SessionTranscript({ entries, onClear }: SessionTranscriptProps) 
             ) : (
               <li key={entry.id} className="flex justify-start">
                 <div className="w-full max-w-[92%]">
-                  {entry.result.execution ? (
+                  {entry.result.workflow ? (
+                    /* Phase 5: a workflow turn — bounded preview or the
+                     * result of an approved run (read-only in the log). */
+                    entry.result.workflow.status ===
+                    WorkflowStatus.AwaitingApproval ? (
+                      <WorkflowPreviewCard
+                        workflow={entry.result.workflow}
+                        onApprove={() => undefined}
+                        onCancel={() => undefined}
+                        readOnly
+                      />
+                    ) : (
+                      <WorkflowProgressCard
+                        workflow={entry.result.workflow}
+                        run={entry.result.workflowRun ?? null}
+                        readOnly
+                      />
+                    )
+                  ) : entry.result.execution ? (
                     /* Phase 4: executed plans render their verified
                      * outcome inline (read-only). */
                     <ActionProgressCard

@@ -9,8 +9,13 @@
 import { fnv1a32 } from '@/page-intelligence/hash';
 import type { ActionPlan, PlannedAction } from './types';
 
-/** Canonical JSON: sorted keys, no whitespace, no volatile fields. */
-function canonicalize(value: unknown): string {
+/**
+ * Canonical JSON: sorted keys, no whitespace, no volatile fields.
+ *
+ * Shared by the Phase 4 plan hash and the Phase 5 workflow hash so both
+ * identities are derived the same, auditable way.
+ */
+export function canonicalize(value: unknown): string {
   if (value === null || typeof value !== 'object') {
     return JSON.stringify(value);
   }

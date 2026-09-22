@@ -1,4 +1,5 @@
 import { APP_NAME, APP_VERSION, PHASE_LABEL } from '@/shared/constants/app';
+import { WORKFLOW_LIMITS } from '@/workflows/limits';
 import { useExtensionStatus } from '@/shared/hooks/useExtensionStatus';
 import { useSettings } from '@/shared/hooks/useSettings';
 import { getCommandLayerShortcut } from '@/shared/platform';
@@ -9,7 +10,7 @@ import {
 import { Segmented } from '@/shared/components/Segmented';
 import { StatusDot } from '@/shared/components/StatusDot';
 import { Toggle } from '@/shared/components/Toggle';
-import { IconChevronLeft, IconShield, IconShieldCheck, IconSparkle } from '@/shared/components/icons';
+import { IconChevronLeft, IconShield, IconShieldCheck, IconSparkle, IconSteps } from '@/shared/components/icons';
 
 const THEME_OPTIONS: readonly { value: ThemeType; label: string }[] = [
   { value: Theme.Dark, label: 'Dark' },
@@ -122,6 +123,51 @@ export function SettingsView({ onBack }: { onBack: () => void }) {
             <li>• Buying, deleting, sending, and downloads are not supported.</li>
             <li>• Free text like “yes” or “do it” never grants permission.</li>
             <li>• If a plan fails or the page changes, execution stops — you decide next.</li>
+          </ul>
+        </section>
+
+        <section className="cl-card p-4" aria-labelledby="settings-workflows">
+          <h2 id="settings-workflows" className="section-label">
+            Task workflows
+          </h2>
+          <div className="mt-3 flex items-start gap-2.5">
+            <IconSteps size={15} className="mt-0.5 shrink-0 text-accent" />
+            <p className="text-[11.5px] leading-4.5 text-text-secondary">
+              A workflow is a short, bounded task — up to{' '}
+              {WORKFLOW_LIMITS.MAX_WORKFLOW_STEPS} steps of registered
+              actions. You see every step before it runs, and each workflow
+              needs its own approval.
+            </p>
+          </div>
+          <ul className="mt-3 space-y-1.5 text-[11px] leading-4 text-text-muted">
+            <li>
+              • Approval is bound to the exact workflow you reviewed: any
+              change to a step invalidates it and asks again.
+            </li>
+            <li>
+              • One workflow runs per tab at a time; steps run one at a time,
+              in order, never in the background of other tabs.
+            </li>
+            <li>
+              • The page is checked only at defined checkpoints (before a
+              step, after a step that changed the page, and on verification)
+              — at most {WORKFLOW_LIMITS.MAX_CONTEXT_REFRESHES} checks, and
+              only the minimum context needed.
+            </li>
+            <li>
+              • A failure stops the workflow and keeps the completed steps:
+              no automatic retry loops. At most{' '}
+              {WORKFLOW_LIMITS.MAX_STEP_RETRIES} retry per step, and only for
+              steps that are safe to repeat.
+            </li>
+            <li>
+              • You can pause, resume, or cancel at any time. Nothing is
+              remembered after the session ends.
+            </li>
+            <li>
+              • There is no “trust forever” mode: every workflow is previewed
+              and approved individually.
+            </li>
           </ul>
         </section>
 

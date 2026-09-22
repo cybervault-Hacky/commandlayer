@@ -7,6 +7,20 @@ founders, and knowledge workers. It is designed to grow into an intelligent
 layer that understands your current web context and eventually researches,
 understands, creates, automates, and executes work across the web.
 
+> **Phase 5 status:** CommandLayer adds a **Contextual Workflow Engine**:
+> short, bounded, multi-step tasks ("find *X* and open the result",
+> "scroll down and read the page"). A goal is understood locally and
+> deterministically, planned into at most **4 steps** of registered
+> actions, previewed step by step, and executed **one step at a time,
+> only after an approval bound to the exact `workflowHash`**. Each step
+> runs through the Phase 4 Action Engine — still the single execution
+> security boundary — and the result is verified before the workflow may
+> continue. A failure **stops** the workflow and keeps what already ran.
+> You can pause, resume, or cancel at any time, page changes stop the run
+> (`WORKFLOW_CONTEXT_CHANGED`), and **nothing is remembered after the
+> session**: no workflow history, no profiling, no background agent, no
+> observe→reason→act loop.
+>
 > **Phase 4 status:** CommandLayer adds a **Safe Action Engine**: bounded,
 > typed browser actions (read page, find text, scroll, click, type,
 > select) that follow a strict pipeline — **Preview → Permission →
@@ -427,7 +441,114 @@ See `docs/action-engine.md` for the full architecture and security model.
 
 ---
 
-## Architecture
+## Phase 5 scope — Contextual Workflows & Task Intelligence
+
+**CommandLayer understands a multi-step browser goal, builds a bounded
+workflow, executes approved steps one at a time, observes the result, and
+continues only within explicit limits.**
+
+```
+User Goal → Task Understanding → Bounded Workflow Plan → Step Preview
+          → Approval → Execute Step → Observe → Verify
+          → Continue/Stop → Final Result
+```
+
+Task understanding is deterministic and local (`src/workflows/understanding.ts`)
+— no model is required to classify a goal, split its clauses, or decide
+what "done" means. AI may only ever *propose* a workflow: a proposal is
+schema-validated, registry-validated, workflow-validated, and then accepted
+**only when its action sequence equals the deterministic plan**. There is
+no path from AI output to a stored workflow, let alone to execution.
+
+### Workflow states
+
+`DRAFT → PREVIEW → AWAITING_APPROVAL → APPROVED → RUNNING → VERIFYING →
+COMPLETED`, with explicit stop states `PAUSED`, `PARTIAL`, `FAILED`,
+`BLOCKED`, `CANCELLED`, `STALE`, and `EXPIRED`. The transition table is
+closed: **there is no edge from DRAFT/PREVIEW to RUNNING**, so nothing can
+execute without passing approval, and terminal states have no outgoing
+edges — a finished workflow can never be resumed.
+
+`COMPLETED` requires the declared outcome to be independently verified. If
+actions ran but the outcome could not be confirmed, the workflow finishes
+`PARTIAL` and says so — CommandLayer never reports success it cannot
+verify.
+
+### Approval, hashing, and change invalidation
+
+Every workflow carries a deterministic `workflowHash` over the goal, the
+ordered step identities, each step's executable actions, the propagated
+risk, the declared outcome, and the page binding (tab, URL, content hash).
+Approving sends that hash back; the engine recomputes it before the first
+step runs. Any material change produces a different hash and invalidates
+the approval (`WORKFLOW_APPROVAL_MISMATCH`). Approvals are single-use and
+expire (`APPROVAL_TTL_MS = 120 s`); duplicate approve/execute/cancel/resume
+messages are safely rejected rather than replayed, and **one workflow may
+drive a tab at a time** (`WORKFLOW_CONFLICT`).
+
+### Execution goes through the Action Engine
+
+The workflow engine never touches a page. It authorizes exactly one step's
+plan — after proving the executable actions are hash-identical to the
+approved step — and the **Phase 4 executor remains the only thing that
+executes** (plan hash, single-use permission, tab/URL/content freshness,
+allowlist, target resolution, sensitive-field block). Each workflow step
+wraps exactly **one** registered action, so a workflow can never batch
+hidden work.
+
+### Observation, verification, and bounded replanning
+
+The page is observed only at defined checkpoints: **before the first step,
+after a step that changed the page, and on verification failure**. There is
+no polling, no `MutationObserver`, and no background surveillance; a run
+may take at most `MAX_CONTEXT_REFRESHES = 8` snapshots, reusing Phase 2
+Page Intelligence. A step is verified by its kind (`FIND_TEXT` needs
+matches, `CLICK_ELEMENT` re-checks the target, `READ_PAGE` needs structure),
+never by reading a value the user typed.
+
+A failure stops the run: no automatic retry loop, at most one retry for a
+step the registry marked retry-safe (`SAFE` / `VERIFY_FIRST` — never a
+blind retry of a click or a type), and at most **one** bounded replan. A
+revision is stored as a **new** workflow awaiting a **new** approval: it
+never inherits the old approval and never continues on its own.
+
+### Hard limits (never unlimited)
+
+Centralized in `WORKFLOW_LIMITS` (`src/workflows/limits.ts`): ≤ 4 steps per
+workflow, exactly 1 action per step, ≤ 8 s per step, 120 s per run, ≤ 1
+retry per step, ≤ 1 replan per workflow, ≤ 8 context observations, 120 s
+approval TTL, 300 s workflow TTL, ≤ 5 pending and ≤ 8 active workflows, and
+one running workflow per tab. There is no runtime override and no settings
+switch that can widen them.
+
+### User control and privacy
+
+Pause (cooperative — no new step starts, an in-flight step may finish),
+Resume, and Cancel (no future step starts) are available throughout, and
+every step is previewed with its deterministic label and risk. Risk is
+propagated upward only (read-only + low risk = low risk; any confirmation
+step keeps the workflow at confirmation), a sensitive-field step blocks the
+whole workflow, and an ambiguous target is refused
+(`WORKFLOW_TARGET_AMBIGUOUS`) instead of guessed.
+
+Workflow state lives **only** in the background worker's memory for the
+session: no storage writes, no permanent history, no profiling, and no
+permanent task memory. Observations are minimal (metadata, headings,
+text), bounded, and never include form values or typed secrets.
+
+### What Phase 5 does not do
+
+- No always-on agent, background browser agent, scheduled browsing, or
+  continuous monitoring — workflows run only when you approve them.
+- No unrestricted autonomous browsing, payments, deletions, or high-risk
+  actions, and no new manifest permissions (`tabs`, `storage`, `sidePanel`,
+  `commands` only).
+- No permanent memory, no integrations (GitHub/Gmail/Slack/Notion/Jira),
+  no "trust forever" or auto-approve switch.
+
+See `docs/workflow-engine.md` for the full model, state machine, planner,
+validator, observation, verification, approval binding, failure model,
+concurrency rules, and extension points.
 
 ```
 src/
@@ -728,13 +849,34 @@ Coverage includes:
   cancellation, safe-Markdown rendering (no HTML execution, no
   `javascript:` links, node cap), and hostile-page end-to-end scenarios.
 
+- **Workflow engine (Phase 5)** — deterministic task understanding
+  (clause splitting outside quotes, bounded clauses, code/approval-forgery
+  refusals, context minimization), the closed state machine (no path to
+  `RUNNING` without approval, no outgoing edges from terminal states),
+  validation (closed/forbidden keys, unregistered actions, step bounds,
+  hash tampering, sensitive-field blocking, risk propagation without
+  downgrade), planning (reference resolution, ambiguity refusal, evidence
+  requirements, proposal acceptance/rejection), the session store
+  (single-use approval, one workflow per tab, TTL expiry, bounded
+  transcript, UI projection), the orchestrator (approval gates, stop
+  conditions, bounded retries, pause/resume/cancel, honest `PARTIAL`),
+  bounded observation and per-step/final verification, replanning (new
+  approval always required), concurrency and run budgets, adversarial
+  inputs (page content is data, replay protection, execution ceilings),
+  the background message surface (typed payload validation, idempotency,
+  tab-change staleness, no persistence), and the Side Panel workflow UI
+  (preview → approve → verified result, plus the Settings safety section).
+
 `npm run smoke` additionally loads the *built* `dist/background.js` **and**
 the *built* `dist/content.js` (the latter into a jsdom web-page fixture
 that includes prompt-injection content) with a chrome shim and exercises
 real end-to-end round-trips: extraction, reasoning commands and quick
 actions (validated AI responses with echoing request ids, http/https-only
-sources, no executable payloads), removed-action rejection, and the
-form-value guarantees on the production bundles.
+sources, no executable payloads), removed-action rejection, the form-value
+guarantees on the production bundles, and the full Phase 5 workflow path
+(create → validate → preview → approve → execute → observe → verify →
+complete) plus wrong-hash, cancelled, stale-tab, sensitive-field,
+duplicate-approval, malformed-payload, and no-storage-write checks.
 
 ---
 
@@ -779,12 +921,20 @@ form-value guarantees on the production bundles.
 
 ---
 
-## Current limitations (Phase 4)
+## Current limitations (Phase 5)
 
 - **Actions are bounded and explicit.** Only the six typed actions in the
-  allowlist exist; every plan needs your approval, and there is no
-  bulk/always-allow mode, no autonomous replanning, and no multi-step
+  allowlist exist; every plan and every workflow needs your approval, and
+  there is no bulk/always-allow mode, no autonomous replanning, and no
   background automation.
+- **Workflows are short and shallow.** At most 4 steps of one action each,
+  planned from the current page only. There is no branching, no looping,
+  no cross-tab or multi-page work, and no dependency graph — a workflow is
+  a linear, reviewable task, not an agent plan. Goals the deterministic
+  planner cannot ground in the captured page are refused
+  (`WORKFLOW_TARGET_NOT_FOUND` / `WORKFLOW_TARGET_AMBIGUOUS`) instead of
+  guessed, and mixed phrasing falls back to the Phase 4 single-action
+  behaviour or to reasoning.
 - **Action phrasing is pattern-based.** The deterministic planner
   understands explicit phrasings like `find "pricing"`, `scroll down`,
   `click the "Save" button`, `type "Mumbai" into the "City" field`,
@@ -833,6 +983,12 @@ form-value guarantees on the production bundles.
   browser actions with preview → permission → execute → verify, plan-hash
   binding, single-use expiring approvals, freshness checks, sensitive-
   field blocking, and stop-on-failure execution.
+- **Phase 5 (delivered):** the Contextual Workflow Engine — deterministic
+  task understanding, bounded multi-step plans, hash-bound single-use
+  approvals, step-by-step execution through the Action Engine, checkpoint
+  observation, per-step verification, honest partial outcomes, bounded
+  retries and one bounded replan, pause/resume/cancel, and session-only
+  state.
 - **Future candidates (not started):** multi-page research and
   cross-tab comparison (Research/Compare were deliberately removed from
   the UI rather than mocked), a wider typed action vocabulary,

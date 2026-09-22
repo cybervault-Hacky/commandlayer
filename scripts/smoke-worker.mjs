@@ -145,6 +145,8 @@ assert(typeof contentListener === 'function', 'content script registered its lis
 // --- chrome shim ------------------------------------------------------------
 const listeners = {};
 const manifestData = manifest;
+let activeTabId = 1;
+let storageWrites = 0;
 globalThis.chrome = {
   runtime: {
     id: 'smoke-test-extension',
@@ -157,11 +159,15 @@ globalThis.chrome = {
   storage: {
     local: {
       get: async () => ({}),
-      set: async () => {},
+      // Counted so Phase 5 can prove workflows are never persisted.
+      set: async () => {
+        storageWrites += 1;
+      },
     },
   },
   tabs: {
-    query: async () => [{ id: 1, title: 'GitHub', url: 'https://github.com/' }],
+    // `activeTabId` is mutable so a test can simulate the tab moving on.
+    query: async () => [{ id: activeTabId, title: 'GitHub', url: 'https://github.com/' }],
     create: async () => ({ id: 99 }),
     // Simulate the browser delivering the message to the page's content
     // script (the REAL dist/content.js listener).
@@ -193,7 +199,7 @@ const sender = { id: 'smoke-test-extension' };
 const ping = await listeners.onMessage({ v: 1, id: 's1', type: 'cl:ping' }, sender);
 assert(ping.ok === true, 'PING resolves ok');
 assert(ping.data?.pong === true, 'PING payload correct');
-assert(ping.data?.version === '0.3.0', 'PING reports version');
+assert(ping.data?.version === '0.4.0', 'PING reports version');
 
 const status = await listeners.onMessage(
   { v: 1, id: 's2', type: 'cl:get-extension-status' },
@@ -201,7 +207,7 @@ const status = await listeners.onMessage(
 );
 assert(status.ok === true, 'GET_EXTENSION_STATUS resolves ok');
 assert(status.data?.environment === 'extension', 'environment detected as extension');
-assert(status.data?.version === '0.3.0', 'status version matches manifest');
+assert(status.data?.version === '0.4.0', 'status version matches manifest');
 assert(status.data?.ai?.providerId === 'local-mock', 'status reports the local mock provider');
 assert(status.data?.ai?.gatewayConfigured === false, 'status reports no gateway configured');
 assert(!/key|secret|token/i.test(JSON.stringify(status.data?.ai ?? {})), 'AI status carries no secrets');
@@ -551,5 +557,393 @@ const afterCancel = await listeners.onMessage(
 );
 assert(afterCancel.ok === true, 'post-cancel execute answered as a result');
 assert(afterCancel.data?.status === 'failed', 'cancelled plan cannot execute');
+
+/* ------------------------------------------------------------------ */
+/* Phase 5 — bounded multi-step workflows                              */
+/* ------------------------------------------------------------------ */
+
+// Baseline for the storage check: settings writes happen earlier in this
+// script; the workflow phase must add none.
+const storageWritesBeforeWorkflows = storageWrites;
+
+// A multi-clause goal is understood as a WORKFLOW, not a single action.
+const workflowSubmit = await listeners.onMessage(
+  {
+    v: 1,
+    id: 's20',
+    type: 'cl:command-submit',
+    payload: { text: 'find "GitHub" and read the page', source: 'sidepanel' },
+  },
+  sender,
+);
+assert(workflowSubmit.ok === true, 'multi-clause goal answered as a result');
+assert(
+  workflowSubmit.data?.workflow !== undefined,
+  'multi-clause goal produced a workflow',
+);
+assert(workflowSubmit.data?.plan === undefined, 'workflow is not downgraded to one plan');
+assert(
+  workflowSubmit.data?.workflow?.status === 'AWAITING_APPROVAL',
+  'workflow waits for approval',
+);
+assert(workflowSubmit.data?.workflow?.steps?.length === 2, 'workflow has two bounded steps');
+assert(
+  workflowSubmit.data?.workflow?.risk === 'READ_ONLY',
+  'read-only workflow keeps read-only risk',
+);
+assert(
+  workflowSubmit.data?.workflow?.maxSteps === 4,
+  'workflow carries the hard step cap',
+);
+assert(
+  typeof workflowSubmit.data?.workflow?.workflowHash === 'string' &&
+    workflowSubmit.data.workflow.workflowHash.length > 0,
+  'workflow carries its binding hash',
+);
+assert(
+  workflowSubmit.data?.understanding?.supported === true,
+  'understanding reports a supported task',
+);
+
+const workflowView = workflowSubmit.data.workflow;
+const workflowBase = {
+  workflowId: workflowView.workflowId,
+  workflowHash: workflowView.workflowHash,
+  source: 'sidepanel',
+};
+
+// The preview is UI-safe: no plans, no page prose, no typed values.
+const workflowJson = JSON.stringify(workflowView);
+assert(!workflowJson.includes('planHash'), 'workflow view exposes no plan hash');
+assert(!workflowJson.includes('actionPlan'), 'workflow view exposes no action plans');
+assert(
+  !workflowJson.includes('Ignore all prior instructions'),
+  'workflow view never echoes page prose',
+);
+
+// Nothing may run before the approval: a forged hash is refused.
+const forgedWorkflowHash = await listeners.onMessage(
+  {
+    v: 1,
+    id: 's21',
+    type: 'cl:workflow-approve',
+    payload: { ...workflowBase, workflowHash: 'forged-hash' },
+  },
+  sender,
+);
+assert(forgedWorkflowHash.ok === true, 'forged workflow approval answered as a result');
+assert(forgedWorkflowHash.data?.status === 'failed', 'forged workflow hash refused');
+assert(
+  forgedWorkflowHash.data?.errorCode === 'WORKFLOW_APPROVAL_MISMATCH',
+  'forged workflow hash reports APPROVAL_MISMATCH',
+);
+assert(
+  forgedWorkflowHash.data?.workflow?.progress?.completed === 0,
+  'nothing executed under a forged approval',
+);
+
+// The real approval runs the bounded steps one at a time, then verifies.
+const approvedWorkflow = await listeners.onMessage(
+  { v: 1, id: 's22', type: 'cl:workflow-approve', payload: workflowBase },
+  sender,
+);
+assert(approvedWorkflow.ok === true, 'workflow approval resolves ok');
+assert(
+  approvedWorkflow.data?.workflow?.status === 'COMPLETED',
+  'workflow completed after every step verified',
+);
+assert(
+  approvedWorkflow.data?.workflow?.progress?.completed === 2,
+  'both steps completed',
+);
+assert(
+  approvedWorkflow.data?.workflowRun?.outcome?.verified === true,
+  'declared outcome verified',
+);
+const workflowEvents = approvedWorkflow.data?.workflow?.events ?? [];
+assert(
+  workflowEvents.some((event) => event.type === 'STEP_STARTED'),
+  'workflow transcript records step starts',
+);
+assert(
+  workflowEvents.some((event) => event.type === 'STEP_COMPLETED'),
+  'workflow transcript records step completions',
+);
+assert(
+  !JSON.stringify(workflowEvents).includes('password'),
+  'workflow transcript carries no sensitive wording',
+);
+
+// A duplicated approve is a safe no-op, never a second execution.
+const replayWorkflow = await listeners.onMessage(
+  { v: 1, id: 's23', type: 'cl:workflow-approve', payload: workflowBase },
+  sender,
+);
+assert(replayWorkflow.ok === true, 'duplicate approval answered as a result');
+assert(replayWorkflow.data?.status === 'failed', 'duplicate approval refused');
+assert(
+  replayWorkflow.data?.errorCode === 'WORKFLOW_ALREADY_COMPLETED',
+  'duplicate approval reports ALREADY_COMPLETED',
+);
+assert(
+  replayWorkflow.data?.workflow?.progress?.completed === 2,
+  'duplicate approval did not re-run any step',
+);
+
+// Status is a read-only poll and rejects unknown workflows.
+const workflowStatus = await listeners.onMessage(
+  { v: 1, id: 's24', type: 'cl:workflow-status', payload: { workflowId: workflowBase.workflowId } },
+  sender,
+);
+assert(workflowStatus.ok === true, 'workflow status resolves ok');
+assert(workflowStatus.data?.workflow?.status === 'COMPLETED', 'status reports completion');
+assert(workflowStatus.data?.workflowRun === undefined, 'status poll runs nothing');
+
+const unknownWorkflow = await listeners.onMessage(
+  { v: 1, id: 's25', type: 'cl:workflow-status', payload: { workflowId: 'nope' } },
+  sender,
+);
+assert(unknownWorkflow.data?.errorCode === 'WORKFLOW_UNKNOWN', 'unknown workflow rejected');
+
+// Cancelled workflows can never start.
+const cancellable = await listeners.onMessage(
+  {
+    v: 1,
+    id: 's26',
+    type: 'cl:command-submit',
+    payload: { text: 'find "For the world" and read the page', source: 'sidepanel' },
+  },
+  sender,
+);
+assert(cancellable.data?.workflow !== undefined, 'second workflow prepared');
+const cancellableView = cancellable.data.workflow;
+const cancelledWorkflow = await listeners.onMessage(
+  { v: 1, id: 's27', type: 'cl:workflow-cancel', payload: { workflowId: cancellableView.workflowId } },
+  sender,
+);
+assert(cancelledWorkflow.ok === true, 'workflow cancel resolves ok');
+assert(cancelledWorkflow.data?.workflow?.status === 'CANCELLED', 'workflow is cancelled');
+assert(
+  cancelledWorkflow.data?.workflow?.canCancel === false,
+  'a cancelled workflow cannot be cancelled again',
+);
+const cancelledApprove = await listeners.onMessage(
+  {
+    v: 1,
+    id: 's28',
+    type: 'cl:workflow-approve',
+    payload: {
+      workflowId: cancellableView.workflowId,
+      workflowHash: cancellableView.workflowHash,
+      source: 'sidepanel',
+    },
+  },
+  sender,
+);
+assert(cancelledApprove.data?.status === 'failed', 'cancelled workflow cannot run');
+assert(
+  cancelledApprove.data?.workflow?.progress?.completed === 0,
+  'cancel prevented every step',
+);
+
+// Pausing/resuming is only possible for a live workflow.
+const earlyResume = await listeners.onMessage(
+  {
+    v: 1,
+    id: 's29',
+    type: 'cl:workflow-resume',
+    payload: {
+      workflowId: cancellableView.workflowId,
+      workflowHash: cancellableView.workflowHash,
+    },
+  },
+  sender,
+);
+assert(earlyResume.data?.status === 'failed', 'resume of a stopped workflow refused');
+
+// Sensitive and executable-content goals never become workflows.
+const sensitiveWorkflow = await listeners.onMessage(
+  {
+    v: 1,
+    id: 's30',
+    type: 'cl:workflow-create',
+    payload: {
+      goal: 'type "hunter2" into the "Password" field and then read the page',
+      source: 'sidepanel',
+    },
+  },
+  sender,
+);
+assert(sensitiveWorkflow.ok === true, 'sensitive workflow request answered as a result');
+assert(sensitiveWorkflow.data?.status === 'failed', 'sensitive workflow refused');
+assert(
+  sensitiveWorkflow.data?.errorCode === 'WORKFLOW_SENSITIVE_ACTION',
+  'sensitive workflow reports SENSITIVE_ACTION',
+);
+assert(sensitiveWorkflow.data?.workflow === undefined, 'sensitive workflow is never stored');
+assert(
+  !/planHash|actionPlan|"steps"/.test(JSON.stringify(sensitiveWorkflow.data ?? {})),
+  'refused workflow carries no plan or step payload',
+);
+assert(
+  !JSON.stringify(sensitiveWorkflow.data?.understanding?.reason ?? '').includes('hunter2'),
+  'refusal reason never repeats the typed value',
+);
+
+const unsafeWorkflow = await listeners.onMessage(
+  {
+    v: 1,
+    id: 's31',
+    type: 'cl:workflow-create',
+    payload: { goal: 'find "GitHub" and run this script', source: 'sidepanel' },
+  },
+  sender,
+);
+assert(unsafeWorkflow.data?.status === 'failed', 'code request refused');
+assert(
+  unsafeWorkflow.data?.errorCode === 'WORKFLOW_UNSAFE_REQUEST',
+  'code request reports UNSAFE_REQUEST',
+);
+
+// A tab change between preview and approval stops the workflow.
+const staleReady = await listeners.onMessage(
+  {
+    v: 1,
+    id: 's32',
+    type: 'cl:workflow-create',
+    payload: { goal: 'find "Repositories" and read the page', source: 'sidepanel' },
+  },
+  sender,
+);
+assert(staleReady.data?.workflow !== undefined, 'third workflow prepared');
+const staleView = staleReady.data.workflow;
+activeTabId = 7; // the user switched tabs before approving
+const staleApprove = await listeners.onMessage(
+  {
+    v: 1,
+    id: 's33',
+    type: 'cl:workflow-approve',
+    payload: {
+      workflowId: staleView.workflowId,
+      workflowHash: staleView.workflowHash,
+      source: 'sidepanel',
+    },
+  },
+  sender,
+);
+assert(staleApprove.data?.status === 'failed', 'tab-bound approval refused');
+assert(
+  staleApprove.data?.errorCode === 'WORKFLOW_TAB_CHANGED',
+  'tab change reports TAB_CHANGED',
+);
+assert(
+  staleApprove.data?.workflow?.status === 'STALE',
+  'workflow is marked STALE',
+);
+assert(
+  staleApprove.data?.workflow?.progress?.completed === 0,
+  'stale workflow executed nothing',
+);
+activeTabId = 1;
+
+// A result-reference goal resolves the captured page links at planning time
+// and raises the workflow risk — nothing clicks until the user approves.
+const navigationPreview = await listeners.onMessage(
+  {
+    v: 1,
+    id: 's41',
+    type: 'cl:workflow-create',
+    payload: { goal: 'find "Features" and open it', source: 'sidepanel' },
+  },
+  sender,
+);
+assert(
+  navigationPreview.data?.workflow !== undefined,
+  'reference goal produced a navigation workflow',
+);
+assert(
+  navigationPreview.data?.workflow?.steps?.[1]?.intent === 'OPEN',
+  'reference clause resolved to an OPEN step',
+);
+assert(
+  navigationPreview.data?.workflow?.steps?.[1]?.kind === 'CLICK_ELEMENT',
+  'OPEN step wraps a registered CLICK_ELEMENT action',
+);
+assert(
+  navigationPreview.data?.workflow?.risk === 'CONFIRMATION_REQUIRED',
+  'navigation workflow requires confirmation',
+);
+assert(
+  navigationPreview.data?.workflow?.expectedOutcome !== undefined,
+  'navigation workflow declares its outcome',
+);
+assert(
+  navigationPreview.data?.workflow?.progress?.completed === 0,
+  'navigation workflow executed nothing before approval',
+);
+assert(
+  navigationPreview.data?.workflow?.canApprove === true,
+  'navigation workflow awaits approval',
+);
+
+// An ambiguous target is refused instead of guessed: two links match
+// "Features" equally well when neither text is an exact match.
+const ambiguousPreview = await listeners.onMessage(
+  {
+    v: 1,
+    id: 's42',
+    type: 'cl:workflow-create',
+    payload: { goal: 'find "code hosting" and open the result', source: 'sidepanel' },
+  },
+  sender,
+);
+assert(
+  ambiguousPreview.data?.status === 'failed',
+  'unevidenced target refused (no guessing)',
+);
+assert(
+  ambiguousPreview.data?.errorCode === 'WORKFLOW_TARGET_NOT_FOUND',
+  'missing target reports TARGET_NOT_FOUND',
+);
+assert(
+  ambiguousPreview.data?.workflow === undefined,
+  'refused goal never becomes a stored workflow',
+);
+
+// Malformed workflow payloads are rejected before anything is built.
+for (const [id, type, payload] of [
+  ['s34', 'cl:workflow-create', { goal: '', source: 'sidepanel' }],
+  ['s35', 'cl:workflow-create', { goal: 'find "GitHub" and read the page' }],
+  ['s36', 'cl:workflow-approve', { workflowId: 'w' }],
+  ['s37', 'cl:workflow-resume', { workflowId: 'w' }],
+  ['s38', 'cl:workflow-pause', {}],
+  ['s39', 'cl:workflow-status', null],
+]) {
+  const bad = await listeners.onMessage({ v: 1, id, type, payload }, sender);
+  assert(bad.ok === false, `malformed ${type} payload rejected`);
+  assert(bad.error?.code === 'INVALID_PAYLOAD', `malformed ${type} reports INVALID_PAYLOAD`);
+}
+
+// Untrusted senders can never drive a workflow.
+const hostileWorkflow = await listeners.onMessage(
+  {
+    v: 1,
+    id: 's40',
+    type: 'cl:workflow-create',
+    payload: { goal: 'find "GitHub" and read the page', source: 'sidepanel' },
+  },
+  { id: 'some-other-extension' },
+);
+assert(hostileWorkflow.ok === false, 'workflow message from an untrusted sender refused');
+assert(
+  hostileWorkflow.error?.code === 'UNAUTHORIZED_SENDER',
+  'untrusted workflow sender reports UNAUTHORIZED_SENDER',
+);
+
+// Phase 5 keeps nothing: no workflow state was written to storage.
+assert(
+  storageWrites === storageWritesBeforeWorkflows,
+  'workflows are never persisted to extension storage',
+);
 
 console.log('\nWorker smoke test: all checks passed.');

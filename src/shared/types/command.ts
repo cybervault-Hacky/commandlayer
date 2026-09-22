@@ -2,6 +2,10 @@ import type { PageContext } from './page';
 import type { QuickActionId as QuickActionIdType } from '../constants/quickActions';
 import type { AIIntent, AIResponse } from '@/ai/types';
 import type { ActionPlan, ActionExecutionResult } from '@/actions/types';
+import type {
+  WorkflowRunResult,
+  WorkflowView,
+} from '@/workflows/types';
 
 export type QuickActionId = QuickActionIdType;
 
@@ -42,6 +46,23 @@ export interface CommandRequest {
   createdAt: string;
 }
 
+/**
+ * Phase 5 — deterministic task understanding, surfaced to the UI so the
+ * user can see what CommandLayer understood before anything is approved.
+ */
+export interface WorkflowUnderstandingView {
+  /** ACTION | WORKFLOW | REASONING | UNSUPPORTED */
+  kind: string;
+  goal: string;
+  expectedOutcome: string;
+  /** Ordered step intents the plan is expected to contain. */
+  intents: string[];
+  /** Page Intelligence sections the plan needed. */
+  contextRequirements: string[];
+  supported: boolean;
+  reason?: string;
+}
+
 /** The terminal result of a command, safe to render in the UI. */
 export interface CommandResult {
   id: string;
@@ -63,6 +84,16 @@ export interface CommandResult {
   plan?: ActionPlan;
   /** Phase 4 — the terminal outcome of an executed action plan. */
   execution?: ActionExecutionResult;
+  /**
+   * Phase 5 — a bounded multi-step workflow prepared for review (status
+   * is 'completed'; nothing has run) or the latest state of one that was
+   * approved and executed.
+   */
+  workflow?: WorkflowView;
+  /** Phase 5 — the bounded outcome of a workflow run that executed. */
+  workflowRun?: WorkflowRunResult;
+  /** Phase 5 — how the request was understood (deterministic analysis). */
+  understanding?: WorkflowUnderstandingView;
   /** Whether a retry may succeed (transient errors only). */
   retryable?: boolean;
   errorCode?: string;

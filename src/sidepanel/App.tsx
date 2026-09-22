@@ -12,6 +12,8 @@ import {
 import { usePageContext } from '@/shared/hooks/usePageContext';
 import { usePageIntelligence } from '@/shared/hooks/usePageIntelligence';
 import { useSettings } from '@/shared/hooks/useSettings';
+import { useWorkflowController } from '@/shared/hooks/useWorkflowController';
+import { WorkflowStatus } from '@/workflows/types';
 import { BrandMark, IconSettings } from '@/shared/components/icons';
 import { AIResponseCard } from '@/shared/components/AIResponseCard';
 import { ActionPreviewCard } from '@/shared/components/ActionPreviewCard';
@@ -20,6 +22,8 @@ import { CommandInput } from '@/shared/components/CommandInput';
 import { CurrentPageCard } from '@/shared/components/CurrentPageCard';
 import { PageInsightCard } from '@/shared/components/PageInsightCard';
 import { QuickActions } from '@/shared/components/QuickActions';
+import { WorkflowPreviewCard } from '@/shared/components/WorkflowPreviewCard';
+import { WorkflowProgressCard } from '@/shared/components/WorkflowProgressCard';
 import { SettingsView } from './components/SettingsView';
 import { FirstRunTip } from './components/FirstRunTip';
 
@@ -44,9 +48,14 @@ export function App() {
   /** The plan currently being executed (preview → progress binding). */
   const [executingPlan, setExecutingPlan] = useState<ActionPlan | null>(null);
 
+  // Phase 5: an approved workflow runs in the background; the panel shows
+  // its bounded preview, step progress, and result.
+  const workflow = useWorkflowController(CommandSource.SidePanel);
+
   // Successful free-text commands clear the draft.
   const pipeline = useCommandPipeline(CommandSource.SidePanel, (result) => {
     if (result.status === 'completed' && !result.execution) setDraft('');
+    if (result.workflow) workflow.open(result.workflow);
   });
 
   const processing = pipeline.phase === 'processing';
@@ -54,15 +63,17 @@ export function App() {
 
   const handleSubmit = useCallback(() => {
     setExecutingPlan(null);
+    workflow.dismiss();
     void pipeline.submitText(draft);
-  }, [pipeline, draft]);
+  }, [pipeline, draft, workflow]);
 
   const handleQuickAction = useCallback(
     (action: QuickAction) => {
       setExecutingPlan(null);
+      workflow.dismiss();
       void pipeline.submitQuickAction(action.id);
     },
-    [pipeline],
+    [pipeline, workflow],
   );
 
   const handleApprove = useCallback(
@@ -83,8 +94,9 @@ export function App() {
 
   const handleClear = useCallback(() => {
     setExecutingPlan(null);
+    workflow.dismiss();
     pipeline.reset();
-  }, [pipeline]);
+  }, [pipeline, workflow]);
 
   // Which card owns the command slot?
   const execution = result?.execution ?? null;
@@ -93,7 +105,9 @@ export function App() {
       ? result.plan
       : null;
   const runningPlan = processing && executingPlan ? executingPlan : null;
-  const showReasoningCard = !execution && !previewPlan && !runningPlan;
+  const activeWorkflow = workflow.workflow;
+  const showReasoningCard =
+    !activeWorkflow && !execution && !previewPlan && !runningPlan;
 
   return (
     <div className="cl-app h-full overflow-y-auto">
@@ -140,6 +154,30 @@ export function App() {
                 loading={processing}
                 placeholder="Ask, or say “find …”, “scroll …”, “click …”"
               />
+
+              {activeWorkflow &&
+                (activeWorkflow.status === WorkflowStatus.AwaitingApproval ? (
+                  <WorkflowPreviewCard
+                    workflow={activeWorkflow}
+                    onApprove={() => void workflow.approve()}
+                    onCancel={() => workflow.dismiss()}
+                    notice={workflow.notice}
+                  />
+                ) : (
+                  <WorkflowProgressCard
+                    workflow={activeWorkflow}
+                    run={workflow.run}
+                    running={
+                      workflow.phase === 'working' ||
+                      workflow.phase === 'running'
+                    }
+                    onPause={() => void workflow.pause()}
+                    onResume={() => void workflow.resume()}
+                    onCancel={() => void workflow.cancel()}
+                    onOpenFollowUp={(followUp) => workflow.open(followUp)}
+                    notice={workflow.notice}
+                  />
+                ))}
 
               {runningPlan && (
                 <ActionProgressCard

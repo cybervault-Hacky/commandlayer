@@ -57,6 +57,31 @@ export interface ActionCancelPayload {
   planId: string;
 }
 
+/**
+ * Phase 5 — workflow payloads. Identity only: the workflow body, its
+ * approval, and the execution loop never cross this boundary.
+ */
+export interface WorkflowCreatePayload {
+  goal: string;
+  source: CommandSource;
+}
+
+export interface WorkflowApprovePayload {
+  workflowId: string;
+  /** The hash the user reviewed and approved. */
+  workflowHash: string;
+  source: CommandSource;
+}
+
+export interface WorkflowResumePayload {
+  workflowId: string;
+  workflowHash: string;
+}
+
+export interface WorkflowIdPayload {
+  workflowId: string;
+}
+
 export interface NoPayload {
   [key: string]: never;
 }
@@ -94,6 +119,30 @@ export interface MessageMap {
   [MessageType.ACTION_CANCEL]: {
     payload: ActionCancelPayload;
     result: { cancelled: true };
+  };
+  [MessageType.WORKFLOW_CREATE]: {
+    payload: WorkflowCreatePayload;
+    result: CommandResult;
+  };
+  [MessageType.WORKFLOW_APPROVE]: {
+    payload: WorkflowApprovePayload;
+    result: CommandResult;
+  };
+  [MessageType.WORKFLOW_PAUSE]: {
+    payload: WorkflowIdPayload;
+    result: CommandResult;
+  };
+  [MessageType.WORKFLOW_RESUME]: {
+    payload: WorkflowResumePayload;
+    result: CommandResult;
+  };
+  [MessageType.WORKFLOW_CANCEL]: {
+    payload: WorkflowIdPayload;
+    result: CommandResult;
+  };
+  [MessageType.WORKFLOW_STATUS]: {
+    payload: WorkflowIdPayload;
+    result: CommandResult;
   };
   [MessageType.OPEN_COMMAND_CENTER]: {
     payload: NoPayload;

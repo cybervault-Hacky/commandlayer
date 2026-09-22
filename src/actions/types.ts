@@ -98,6 +98,25 @@ export type Action =
   | TypeTextAction
   | SelectOptionAction;
 
+/**
+ * Retry characteristic of an action kind. Owned by the registry — never
+ * by AI output, never by a request, and never configurable at runtime.
+ *
+ * - NEVER: repeating the action could duplicate a side effect (clicks,
+ *   typing, relative scrolls).
+ * - SAFE: the action is a pure read; repeating it changes nothing.
+ * - VERIFY_FIRST: the action may be repeated at most once, and only after
+ *   the step's verification condition was evaluated and found unmet.
+ */
+export const ActionRetryPolicy = {
+  Never: 'NEVER',
+  Safe: 'SAFE',
+  VerifyFirst: 'VERIFY_FIRST',
+} as const;
+
+export type ActionRetryPolicy =
+  (typeof ActionRetryPolicy)[keyof typeof ActionRetryPolicy];
+
 /** One step of a plan: a validated action with a stable identity. */
 export interface PlannedAction {
   stepId: string;

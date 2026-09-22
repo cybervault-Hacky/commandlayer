@@ -35,6 +35,14 @@ import {
 } from '@/ai/types';
 import { planAction, looksLikeActionRequest } from '@/actions/planner';
 import { actionSessionStore } from '@/actions/session';
+import { planWorkflow } from '@/workflows/planner';
+import {
+  analyzeGoalText,
+  TaskKind,
+} from '@/workflows/understanding';
+import { toWorkflowView, workflowSessionStore } from '@/workflows/state';
+import type { TaskUnderstanding } from '@/workflows/understanding';
+import type { WorkflowView } from '@/workflows/types';
 import { actionRegistry } from '@/actions/registry';
 import { pageContentDigest } from '@/page-intelligence/hash';
 import type { ActionPlan } from '@/actions/types';
@@ -48,7 +56,13 @@ import {
 export type HandlerResult =
   | { kind: 'success'; response: AIResponse }
   | { kind: 'error'; error: AIError; intent?: AIIntent }
-  | { kind: 'plan'; plan: ActionPlan };
+  | { kind: 'plan'; plan: ActionPlan }
+  | {
+      kind: 'workflow';
+      workflow: WorkflowView;
+      understanding: TaskUnderstanding;
+    }
+  | { kind: 'refusal'; understanding: TaskUnderstanding; errorCode: string };
 
 export interface CommandHandler {
   handle(request: CommandRequest, signal: AbortSignal): Promise<HandlerResult>;
@@ -73,8 +87,15 @@ export class AICommandHandler implements CommandHandler {
       return this.reason(request, text, intent, signal);
     }
 
-    // Phase 4: explicit action phrasings produce a PLAN, never direct
-    // execution. Planning requires a real page context to bind to.
+    // Phase 5: a multi-clause goal is planned as a bounded WORKFLOW
+    // before any single-action planning, so a multi-step request is never
+    // silently downgraded to one step. Refusals (code/browser/shell
+    // requests, approval forgery) surface here too, before planning.
+    const workflowResult = this.planWorkflow(request, text);
+    if (workflowResult !== null) return workflowResult;
+
+    // Phase 4: explicit action phrasings produce a PLAN, never execution.
+    // Planning requires a real page context to bind to.
     if (looksLikeActionRequest(text)) {
       const planResult = this.plan(request, text);
       if (planResult !== null) return planResult;
@@ -108,6 +129,77 @@ export class AICommandHandler implements CommandHandler {
       return { kind: 'plan', plan: outcome.plan };
     }
     return null;
+  }
+
+  /**
+   * Phase 5: build a bounded workflow (2..MAX_WORKFLOW_STEPS steps) for a
+   * multi-step goal. Returns null when the goal is not a supported
+   * multi-step task — the caller then falls back to the Phase 4 single
+   * action path. Nothing is approved or executed here: the plan is
+   * stored awaiting explicit approval.
+   */
+  private planWorkflow(
+    request: CommandRequest,
+    text: string,
+  ): HandlerResult | null {
+    const analysis = analyzeGoalText(text);
+
+    // Refusals are decided from the text alone (never from page content):
+    // code/browser/shell requests and approval-forgery phrasings are
+    // refused before any planner — or the AI — sees them.
+    if (analysis.refusal) {
+      return {
+        kind: 'refusal',
+        errorCode: analysis.refusal.code,
+        understanding: {
+          goal: analysis.goal,
+          kind: TaskKind.Unsupported,
+          intents: [],
+          expectedOutcome: '',
+          contextRequirements: [],
+          supported: false,
+          reason: analysis.refusal.message,
+          errorCode: analysis.refusal.code,
+        },
+      };
+    }
+
+    const context = request.context;
+    if (context === null || request.tabId === undefined) return null;
+    if (context.state !== 'ready' && context.state !== 'partial') return null;
+
+    const planned = planWorkflow({
+      goal: text,
+      requestId: request.id,
+      context,
+      tabId: request.tabId,
+      now: new Date(),
+    });
+
+    if (!planned.workflow) {
+      // A goal that is workflow-shaped but cannot be planned safely
+      // (unresolvable/ambiguous target, too many steps, sensitive field)
+      // is reported instead of being silently downgraded to one step.
+      if (planned.error && planned.understanding.kind === TaskKind.Unsupported) {
+        return {
+          kind: 'refusal',
+          understanding: planned.understanding,
+          errorCode: planned.error.code,
+        };
+      }
+      return null;
+    }
+
+    // The workflow lives in the background session store; it needs its own
+    // explicit approval bound to this exact workflow hash.
+    workflowSessionStore.create(planned.workflow);
+    const record = workflowSessionStore.get(planned.workflow.workflowId);
+    if (!record) return null;
+    return {
+      kind: 'workflow',
+      workflow: toWorkflowView(record),
+      understanding: planned.understanding,
+    };
   }
 
   private async reason(
@@ -252,6 +344,59 @@ export class CommandDispatcher {
           ...(output.intent ? { intent: output.intent } : {}),
           errorCode: output.error.code,
           retryable: output.error.retryable,
+          startedAt,
+          finishedAt,
+        };
+      }
+
+      if (output.kind === 'workflow') {
+        // A workflow proposal is a successful COMMAND, not an execution:
+        // the run needs a separate approval bound to the workflow hash.
+        const count = output.workflow.steps.length;
+        return {
+          id: request.id,
+          status: 'completed',
+          text: `I prepared a ${count}-step workflow. Review it before running anything.`,
+          ...base,
+          workflow: output.workflow,
+          understanding: {
+            kind: output.understanding.kind,
+            goal: output.understanding.goal,
+            expectedOutcome: output.understanding.expectedOutcome,
+            intents: [...output.understanding.intents],
+            contextRequirements: [...output.understanding.contextRequirements],
+            supported: output.understanding.supported,
+            ...(output.understanding.reason
+              ? { reason: output.understanding.reason }
+              : {}),
+          },
+          retryable: false,
+          startedAt,
+          finishedAt,
+        };
+      }
+
+      if (output.kind === 'refusal') {
+        // A refusal is a typed failure, never an executed action and never
+        // an AI answer: the request is out of scope by policy.
+        return {
+          id: request.id,
+          status: 'failed',
+          text: output.understanding.reason ?? 'That request is not supported.',
+          ...base,
+          understanding: {
+            kind: output.understanding.kind,
+            goal: output.understanding.goal,
+            expectedOutcome: output.understanding.expectedOutcome,
+            intents: [...output.understanding.intents],
+            contextRequirements: [...output.understanding.contextRequirements],
+            supported: false,
+            ...(output.understanding.reason
+              ? { reason: output.understanding.reason }
+              : {}),
+          },
+          errorCode: output.errorCode,
+          retryable: false,
           startedAt,
           finishedAt,
         };

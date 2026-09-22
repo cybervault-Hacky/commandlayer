@@ -12,12 +12,16 @@ import { describeTarget } from './targets';
 import {
   ActionKind,
   ActionRisk,
+  ActionRetryPolicy,
   type Action,
+  type ActionRetryPolicy as ActionRetryPolicyType,
 } from './types';
 
 export interface ActionDefinition {
   readonly type: ActionKind;
   readonly risk: ActionRisk;
+  /** Deterministic retry characteristic (Phase 5 workflow retries). */
+  readonly retryPolicy: ActionRetryPolicyType;
   /** Short imperative label for progress UI, e.g. 'Click'. */
   readonly verb: string;
   /** Generate the human-readable preview line for one action. */
@@ -27,12 +31,14 @@ export interface ActionDefinition {
 const DEFINITIONS: Record<ActionKind, ActionDefinition> = {
   [ActionKind.ReadPage]: {
     type: ActionKind.ReadPage,
+    retryPolicy: ActionRetryPolicy.Safe,
     risk: ActionRisk.ReadOnly,
     verb: 'Read',
     preview: () => 'Read this page’s structure (read-only)',
   },
   [ActionKind.FindText]: {
     type: ActionKind.FindText,
+    retryPolicy: ActionRetryPolicy.Safe,
     risk: ActionRisk.ReadOnly,
     verb: 'Find',
     preview: (a) =>
@@ -42,6 +48,7 @@ const DEFINITIONS: Record<ActionKind, ActionDefinition> = {
   },
   [ActionKind.Scroll]: {
     type: ActionKind.Scroll,
+    retryPolicy: ActionRetryPolicy.Never,
     risk: ActionRisk.Low,
     verb: 'Scroll',
     preview: (a) => {
@@ -60,6 +67,7 @@ const DEFINITIONS: Record<ActionKind, ActionDefinition> = {
   },
   [ActionKind.ClickElement]: {
     type: ActionKind.ClickElement,
+    retryPolicy: ActionRetryPolicy.Never,
     risk: ActionRisk.Confirmation,
     verb: 'Click',
     preview: (a) =>
@@ -69,6 +77,7 @@ const DEFINITIONS: Record<ActionKind, ActionDefinition> = {
   },
   [ActionKind.TypeText]: {
     type: ActionKind.TypeText,
+    retryPolicy: ActionRetryPolicy.Never,
     risk: ActionRisk.Confirmation,
     verb: 'Type',
     preview: (a) => {
@@ -82,6 +91,7 @@ const DEFINITIONS: Record<ActionKind, ActionDefinition> = {
   },
   [ActionKind.SelectOption]: {
     type: ActionKind.SelectOption,
+    retryPolicy: ActionRetryPolicy.VerifyFirst,
     risk: ActionRisk.Confirmation,
     verb: 'Select',
     preview: (a) =>
@@ -95,6 +105,21 @@ class ActionRegistry {
   /** Risk is fixed per action kind; the AI cannot influence it. */
   riskOf(kind: ActionKind): ActionRisk {
     return DEFINITIONS[kind].risk;
+  }
+
+  /**
+   * Retry characteristic for a concrete action. Scroll is the one
+   * direction-dependent case: absolute scrolls (top/bottom) are
+   * idempotent, relative scrolls are not.
+   */
+  retryPolicyOf(action: Action): ActionRetryPolicyType {
+    const base = DEFINITIONS[action.type].retryPolicy;
+    if (action.type === ActionKind.Scroll) {
+      return action.direction === 'top' || action.direction === 'bottom'
+        ? ActionRetryPolicy.Safe
+        : ActionRetryPolicy.Never;
+    }
+    return base;
   }
 
   definition(kind: ActionKind): ActionDefinition {

@@ -22,6 +22,17 @@ export const MessageType = {
   ACTION_EXECUTE: 'cl:action-execute',
   /** Withdraw approval for a pending plan. */
   ACTION_CANCEL: 'cl:action-cancel',
+  /**
+   * Phase 5 — bounded multi-step workflows. Each message is identity-only
+   * (workflowId + the approved workflowHash); the workflow body, its
+   * approval, and the execution loop all live in the background.
+   */
+  WORKFLOW_CREATE: 'cl:workflow-create',
+  WORKFLOW_APPROVE: 'cl:workflow-approve',
+  WORKFLOW_PAUSE: 'cl:workflow-pause',
+  WORKFLOW_RESUME: 'cl:workflow-resume',
+  WORKFLOW_CANCEL: 'cl:workflow-cancel',
+  WORKFLOW_STATUS: 'cl:workflow-status',
   OPEN_COMMAND_CENTER: 'cl:open-command-center',
   OPEN_SIDE_PANEL: 'cl:open-side-panel',
   GET_SETTINGS: 'cl:get-settings',

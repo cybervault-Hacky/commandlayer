@@ -42,11 +42,24 @@ import type {
   ActionExecutePayload,
   MessageEnvelope,
   MessageResult,
+  WorkflowApprovePayload,
+  WorkflowCreatePayload,
+  WorkflowIdPayload,
+  WorkflowResumePayload,
 } from '@/shared/types/message';
 import { getExtensionStatus } from './status';
 import { getCurrentPage, getPageContext, getActiveTabId } from './pageContext';
 import { openCommandCenterTab, openSidePanelForActiveTab } from './openers';
 import { executeApprovedPlan, cancelPlan } from './actionSession';
+import {
+  approveWorkflowCommand,
+  cancelWorkflowCommand,
+  createWorkflowCommand,
+  pauseWorkflowCommand,
+  resumeWorkflowCommand,
+  workflowStatusCommand,
+  WORKFLOW_SECTIONS,
+} from './workflowSession';
 
 const COMMAND_SOURCES: ReadonlySet<string> = new Set([
   'sidepanel',
@@ -144,6 +157,67 @@ function validateActionCancelPayload(payload: unknown): ActionCancelPayload | nu
   if (!isRecord(payload)) return null;
   if (typeof payload.planId !== 'string' || payload.planId.length === 0) return null;
   return { planId: payload.planId };
+}
+
+/**
+ * Phase 5 payloads. Identity only: the workflow body and its approval are
+ * never accepted from a caller — only ids and the reviewed hash, which is
+ * verified against the stored workflow before anything runs.
+ */
+function validateWorkflowCreatePayload(
+  payload: unknown,
+): WorkflowCreatePayload | null {
+  if (!isRecord(payload)) return null;
+  if (typeof payload.goal !== 'string') return null;
+  const goal = payload.goal.trim();
+  if (goal.length === 0 || goal.length > COMMAND_TEXT_MAX) return null;
+  if (!isCommandSource(payload.source)) return null;
+  return { goal, source: payload.source };
+}
+
+function validateWorkflowApprovePayload(
+  payload: unknown,
+): WorkflowApprovePayload | null {
+  if (!isRecord(payload)) return null;
+  if (typeof payload.workflowId !== 'string' || payload.workflowId.length === 0) {
+    return null;
+  }
+  if (
+    typeof payload.workflowHash !== 'string' ||
+    payload.workflowHash.length === 0
+  ) {
+    return null;
+  }
+  if (!isCommandSource(payload.source)) return null;
+  return {
+    workflowId: payload.workflowId,
+    workflowHash: payload.workflowHash,
+    source: payload.source,
+  };
+}
+
+function validateWorkflowResumePayload(
+  payload: unknown,
+): WorkflowResumePayload | null {
+  if (!isRecord(payload)) return null;
+  if (typeof payload.workflowId !== 'string' || payload.workflowId.length === 0) {
+    return null;
+  }
+  if (
+    typeof payload.workflowHash !== 'string' ||
+    payload.workflowHash.length === 0
+  ) {
+    return null;
+  }
+  return { workflowId: payload.workflowId, workflowHash: payload.workflowHash };
+}
+
+function validateWorkflowIdPayload(payload: unknown): WorkflowIdPayload | null {
+  if (!isRecord(payload)) return null;
+  if (typeof payload.workflowId !== 'string' || payload.workflowId.length === 0) {
+    return null;
+  }
+  return { workflowId: payload.workflowId };
 }
 
 const MAX_SECTION_REQUESTS = 7;
@@ -283,6 +357,97 @@ async function dispatchMessage(message: MessageEnvelope): Promise<unknown> {
         planId: payload.planId,
         planHash: payload.planHash,
         source: payload.source,
+      });
+    }
+
+    /**
+     * Phase 5 — understand a goal and prepare a bounded workflow. This
+     * NEVER executes: the reply carries the preview awaiting approval.
+     */
+    case MessageType.WORKFLOW_CREATE: {
+      const payload = validateWorkflowCreatePayload(message.payload);
+      if (!payload) {
+        throw new CommandLayerError(
+          ErrorCode.INVALID_PAYLOAD,
+          USER_ERROR_MESSAGES[ErrorCode.INVALID_PAYLOAD],
+        );
+      }
+      const context = await getPageContext({
+        sections: [...WORKFLOW_SECTIONS],
+      });
+      return createWorkflowCommand({
+        goal: payload.goal,
+        source: payload.source,
+        context,
+      });
+    }
+
+    /** Phase 5 — approve one workflow hash; the engine runs the steps. */
+    case MessageType.WORKFLOW_APPROVE: {
+      const payload = validateWorkflowApprovePayload(message.payload);
+      if (!payload) {
+        throw new CommandLayerError(
+          ErrorCode.INVALID_PAYLOAD,
+          USER_ERROR_MESSAGES[ErrorCode.INVALID_PAYLOAD],
+        );
+      }
+      return approveWorkflowCommand(payload);
+    }
+
+    case MessageType.WORKFLOW_PAUSE: {
+      const payload = validateWorkflowIdPayload(message.payload);
+      if (!payload) {
+        throw new CommandLayerError(
+          ErrorCode.INVALID_PAYLOAD,
+          USER_ERROR_MESSAGES[ErrorCode.INVALID_PAYLOAD],
+        );
+      }
+      return pauseWorkflowCommand({
+        workflowId: payload.workflowId,
+        source: 'sidepanel',
+      });
+    }
+
+    case MessageType.WORKFLOW_RESUME: {
+      const payload = validateWorkflowResumePayload(message.payload);
+      if (!payload) {
+        throw new CommandLayerError(
+          ErrorCode.INVALID_PAYLOAD,
+          USER_ERROR_MESSAGES[ErrorCode.INVALID_PAYLOAD],
+        );
+      }
+      return resumeWorkflowCommand({
+        workflowId: payload.workflowId,
+        workflowHash: payload.workflowHash,
+        source: 'sidepanel',
+      });
+    }
+
+    case MessageType.WORKFLOW_CANCEL: {
+      const payload = validateWorkflowIdPayload(message.payload);
+      if (!payload) {
+        throw new CommandLayerError(
+          ErrorCode.INVALID_PAYLOAD,
+          USER_ERROR_MESSAGES[ErrorCode.INVALID_PAYLOAD],
+        );
+      }
+      return cancelWorkflowCommand({
+        workflowId: payload.workflowId,
+        source: 'sidepanel',
+      });
+    }
+
+    case MessageType.WORKFLOW_STATUS: {
+      const payload = validateWorkflowIdPayload(message.payload);
+      if (!payload) {
+        throw new CommandLayerError(
+          ErrorCode.INVALID_PAYLOAD,
+          USER_ERROR_MESSAGES[ErrorCode.INVALID_PAYLOAD],
+        );
+      }
+      return workflowStatusCommand({
+        workflowId: payload.workflowId,
+        source: 'sidepanel',
       });
     }
 

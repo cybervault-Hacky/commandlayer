@@ -311,6 +311,17 @@ export function IconCircleDot(props: IconProps) {
   );
 }
 
+export function IconSteps(props: IconProps) {
+  const { size = 16, ...rest } = props;
+  return (
+    <svg {...svgProps(size, rest)}>
+      <path d="M5 6.5h9" />
+      <path d="M5 12h13" />
+      <path d="M5 17.5h6" />
+    </svg>
+  );
+}
+
 export function IconShieldCheck(props: IconProps) {
   const { size = 16, ...rest } = props;
   return (
