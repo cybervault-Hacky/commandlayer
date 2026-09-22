@@ -1,0 +1,28 @@
+@import 'tailwindcss';
+@import './tokens.css';
+@import './base.css';
+
+/*
+ * Expose the CommandLayer token set to Tailwind as utilities
+ * (bg-surface, text-text-secondary, border-border, ...).
+ * `inline` keeps the generated utilities referencing the CSS variables, so
+ * runtime theme switching ([data-theme]) works without rebuilding styles.
+ */
+@theme inline {
+  --color-bg: var(--cl-bg);
+  --color-surface: var(--cl-surface);
+  --color-surface-elevated: var(--cl-surface-elevated);
+  --color-border: var(--cl-border);
+  --color-border-strong: var(--cl-border-strong);
+  --color-text-primary: var(--cl-text-primary);
+  --color-text-secondary: var(--cl-text-secondary);
+  --color-text-muted: var(--cl-text-muted);
+  --color-accent: var(--cl-accent);
+  --color-accent-hover: var(--cl-accent-hover);
+  --color-accent-soft: var(--cl-accent-soft);
+  --color-success: var(--cl-success);
+  --color-warning: var(--cl-warning);
+  --color-error: var(--cl-error);
+  --font-sans: var(--cl-font-sans);
+  --font-mono: var(--cl-font-mono);
+}
