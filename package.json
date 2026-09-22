@@ -17,8 +17,9 @@
     "test:watch": "vitest",
     "icons": "node scripts/generate-icons.mjs",
     "clean": "node scripts/clean.mjs",
-    "smoke": "npm run build && node scripts/smoke-worker.mjs",
-    "check": "npm run lint && npm run typecheck && npm run test && npm run build"
+    "smoke": "npm run build && node scripts/verify-extension.mjs && node scripts/smoke-worker.mjs",
+    "verify:extension": "node scripts/verify-extension.mjs",
+    "check": "npm run lint && npm run typecheck && npm run test && npm run build && npm run verify:extension"
   },
   "dependencies": {
     "react": "^19.3.0",

@@ -1,7 +1,7 @@
 /**
  * Service-worker smoke test for the PRODUCTION build.
  *
- * Loads dist/background.js in Node with a minimal chrome.* shim and drives
+ * Loads extension/background.js in Node with a minimal chrome.* shim and drives
  * it through real message round-trips (ping, status, page context, command
  * pipeline, malformed-message rejection). This validates that the built
  * worker evaluates and behaves correctly without a browser.
@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { JSDOM } from 'jsdom';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const dist = join(root, 'dist');
+const extensionDir = join(root, 'extension');
 
 function assert(condition, label) {
   if (!condition) {
@@ -24,7 +24,7 @@ function assert(condition, label) {
   console.log(`ok - ${label}`);
 }
 
-// --- dist sanity ----------------------------------------------------------
+// --- publishable extension sanity -----------------------------------------
 for (const file of [
   'manifest.json',
   'background.js',
@@ -37,10 +37,10 @@ for (const file of [
   'icons/icon48.png',
   'icons/icon128.png',
 ]) {
-  assert(existsSync(join(dist, file)), `dist/${file} exists`);
+  assert(existsSync(join(extensionDir, file)), `extension/${file} exists`);
 }
 
-const manifest = JSON.parse(readFileSync(join(dist, 'manifest.json'), 'utf8'));
+const manifest = JSON.parse(readFileSync(join(extensionDir, 'manifest.json'), 'utf8'));
 assert(manifest.manifest_version === 3, 'manifest is Manifest V3');
 assert(manifest.background?.service_worker === 'background.js', 'worker path correct');
 assert(manifest.background?.type === 'module', 'worker is a module');
@@ -58,7 +58,7 @@ assert(
   contentScripts[0]?.js?.[0] === 'content.js',
   'content script bundle wired',
 );
-const contentBundle = readFileSync(join(dist, 'content.js'), 'utf8');
+const contentBundle = readFileSync(join(extensionDir, 'content.js'), 'utf8');
 assert(
   contentBundle.includes('cl:extract-page-context-request'),
   'content bundle speaks the extraction protocol',
@@ -68,21 +68,22 @@ assert(
   'content bundle speaks the action execution protocol',
 );
 assert(!/fetch\(|XMLHttpRequest/.test(contentBundle), 'content bundle makes no network calls');
+assert(!/\.map$/.test(contentBundle), 'no source maps shipped');
 
 // HTML pages reference assets that exist
 for (const page of ['popup.html', 'sidepanel.html', 'command-center.html']) {
-  const html = readFileSync(join(dist, page), 'utf8');
+  const html = readFileSync(join(extensionDir, page), 'utf8');
   const refs = [...html.matchAll(/(?:src|href)="([^"]+\.js|[^"]+\.css)"/g)].map((m) => m[1]);
   for (const ref of refs) {
     assert(
-      existsSync(join(dist, ref.replace(/^\.\//, ''))),
+      existsSync(join(extensionDir, ref.replace(/^\.\//, ''))),
       `${page} -> ${ref} exists`,
     );
   }
 }
 
 // --- simulated web page (jsdom) + REAL content bundle -----------------------
-// The smoke test loads the PRODUCTION content script (dist/content.js) into a
+// The smoke test loads the PRODUCTION content script (extension/content.js) into a
 // jsdom window with a small page fixture. `tabs.sendMessage` then forwards
 // the background's real request to that real listener, and the background
 // validates the real extraction result. Everything except the browser is the
@@ -139,7 +140,7 @@ dom.window.chrome = {
     },
   },
 };
-dom.window.eval(readFileSync(join(dist, 'content.js'), 'utf8'));
+dom.window.eval(readFileSync(join(extensionDir, 'content.js'), 'utf8'));
 assert(typeof contentListener === 'function', 'content script registered its listener');
 
 // --- chrome shim ------------------------------------------------------------
@@ -170,7 +171,7 @@ globalThis.chrome = {
     query: async () => [{ id: activeTabId, title: 'GitHub', url: 'https://github.com/' }],
     create: async () => ({ id: 99 }),
     // Simulate the browser delivering the message to the page's content
-    // script (the REAL dist/content.js listener).
+    // script (the REAL extension/content.js listener).
     sendMessage: async (_tabId, message) => {
       let response = undefined;
       contentListener(message, { id: 'smoke-test-extension' }, (r) => {
@@ -188,7 +189,7 @@ globalThis.chrome = {
 };
 
 // --- load the built worker ----------------------------------------------------
-await import(join(dist, 'background.js'));
+await import(join(extensionDir, 'background.js'));
 
 assert(typeof listeners.onMessage === 'function', 'onMessage listener registered');
 assert(typeof listeners.onInstalled === 'function', 'onInstalled listener registered');

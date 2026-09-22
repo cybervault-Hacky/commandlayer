@@ -4,7 +4,7 @@ import { defineConfig } from 'vite';
 /**
  * Content-script build (Phase 2 — Page Intelligence).
  *
- * Emits a single self-contained IIFE at dist/content.js, matching the
+ * Emits a single self-contained IIFE at extension/content.js, matching the
  * `content_scripts` entry in public/manifest.json. The bundle is
  * extraction-only: no network calls, no command execution, no secrets.
  */
@@ -15,8 +15,8 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: 'dist',
-    // The main UI build cleans dist/ via npm run clean; do not wipe it here.
+    outDir: 'extension',
+    // The main UI build cleans extension/ via npm run clean; do not wipe it here.
     emptyOutDir: false,
     target: 'es2022',
     sourcemap: false,

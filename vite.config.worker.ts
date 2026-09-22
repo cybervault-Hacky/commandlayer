@@ -4,7 +4,7 @@ import { defineConfig } from 'vite';
 /**
  * Background service worker build.
  *
- * Emits a single self-contained ES module at dist/background.js, matching the
+ * Emits a single self-contained ES module at extension/background.js, matching the
  * `background.service_worker` entry in public/manifest.json.
  */
 export default defineConfig({
@@ -14,8 +14,8 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: 'dist',
-    // The main UI build cleans dist/ via npm run clean; do not wipe it here.
+    outDir: 'extension',
+    // The main UI build cleans extension/ via npm run clean; do not wipe it here.
     emptyOutDir: false,
     target: 'es2022',
     sourcemap: false,
