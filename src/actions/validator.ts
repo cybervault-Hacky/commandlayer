@@ -13,6 +13,7 @@
  * Parsing grants nothing; validation grants nothing; only an explicit
  * user approval of a stored, hashed plan can start execution.
  */
+import { parseNavTarget } from '@/github/patterns';
 import { ACTION_LIMITS } from './limits';
 import { parseElementTarget } from './targets';
 import {
@@ -44,6 +45,7 @@ function boundedText(value: unknown, max: number): string | null {
 /** Exact field sets per action kind (closed contract). */
 const ALLOWED_FIELDS: Record<ActionKind, ReadonlySet<string>> = {
   [ActionKind.ReadPage]: new Set(['type']),
+  [ActionKind.NavigateGitHub]: new Set(['type', 'target']),
   [ActionKind.Scroll]: new Set(['type', 'direction', 'distancePx']),
   [ActionKind.FindText]: new Set(['type', 'query', 'caseSensitive']),
   [ActionKind.ClickElement]: new Set(['type', 'target']),
@@ -70,6 +72,14 @@ export function parseActionCandidate(value: unknown): Action | null {
   switch (type) {
     case ActionKind.ReadPage:
       return { type };
+
+    case ActionKind.NavigateGitHub: {
+      // Typed target only. A raw URL, an arbitrary host, or any unknown
+      // field rejects the candidate (see parseNavTarget's closed contract).
+      const target = parseNavTarget(value.target);
+      if (target === null) return null;
+      return { type, target };
+    }
 
     case ActionKind.Scroll: {
       const direction = value.direction;

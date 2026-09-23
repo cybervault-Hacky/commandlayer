@@ -13,6 +13,8 @@
  * - every string is sanitized and every collection is capped
  */
 
+import type { GitHubPageContext } from '@/github/types';
+
 export type PageContextState =
   | 'not-requested' // intelligence requested nothing yet (UI initial state)
   | 'requesting' // capture in flight (UI state; not produced by extractors)
@@ -38,6 +40,12 @@ export const PageSection = {
   Tables: 'tables',
   Forms: 'forms',
   Selection: 'selection',
+  /**
+   * Phase 7 — GitHub structure. Requested only by developer intents; absent
+   * on non-GitHub pages (nothing GitHub-shaped is ever attached to a
+   * regular page).
+   */
+  GitHub: 'github',
 } as const;
 
 export type PageSection = (typeof PageSection)[keyof typeof PageSection];
@@ -122,6 +130,12 @@ export interface PageContext {
   truncated: boolean;
   /** Lightweight identity (FNV-1a 32-bit hex) for change detection. */
   contentHash?: string;
+
+  /**
+   * Phase 7 — bounded, typed GitHub context (Phase 7 page intelligence).
+   * Present only on supported GitHub surfaces whose capture validated.
+   */
+  github?: GitHubPageContext;
 
   capturedAt: string;
 }

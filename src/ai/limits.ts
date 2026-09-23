@@ -18,6 +18,31 @@ export const AI_LIMITS = {
   MAX_CONTEXT_TABLE_ROWS: 15,
   MAX_CONTEXT_SELECTED: 1000,
 
+  /**
+   * Phase 7 — developer intelligence (hard bounds). The developer context is
+   * excerpt-only: bounded file lists, bounded code/diff lines, bounded
+   * findings. Nothing here can grow with repository size.
+   */
+  MAX_DEVELOPER_FILES: 40,
+  MAX_DEVELOPER_CHANGED_FILES: 30,
+  MAX_DEVELOPER_CODE_LINES: 120,
+  MAX_DEVELOPER_DIFF_LINES: 120,
+  MAX_DEVELOPER_LINE_CHARS: 200,
+  MAX_DEVELOPER_OBSERVATIONS: 8,
+  MAX_DEVELOPER_OBSERVATION_CHARS: 200,
+
+  /** Structured findings / change plans in one validated response. */
+  MAX_FINDINGS: 12,
+  MAX_FINDING_TEXT: 400,
+  MAX_CHANGE_PLAN_STEPS: 8,
+  MAX_CHANGE_PLAN_TITLE: 140,
+  MAX_CHANGE_PLAN_DETAIL: 400,
+  MAX_CHANGE_PLAN_FILES: 10,
+
+  // Phase 6 — saved memory attached to one request (hard bounds)
+  MAX_REQUEST_MEMORIES: 4,
+  MAX_MEMORY_CHARS: 240,
+
   // Serialized payload budget (hard cap before the request leaves the client)
   MAX_SERIALIZE_CHARS: 60000,
 

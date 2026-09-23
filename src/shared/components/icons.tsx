@@ -311,12 +311,154 @@ export function IconCircleDot(props: IconProps) {
   );
 }
 
+export function IconSteps(props: IconProps) {
+  const { size = 16, ...rest } = props;
+  return (
+    <svg {...svgProps(size, rest)}>
+      <path d="M5 6.5h9" />
+      <path d="M5 12h13" />
+      <path d="M5 17.5h6" />
+    </svg>
+  );
+}
+
 export function IconShieldCheck(props: IconProps) {
   const { size = 16, ...rest } = props;
   return (
     <svg {...svgProps(size, rest)}>
       <path d="M12 3 5 5.8v5.4c0 4.4 3 7.6 7 8.8 4-1.2 7-4.4 7-8.8V5.8z" />
       <path d="m9.2 11.8 2 2 3.6-3.9" />
+    </svg>
+  );
+}
+
+export function IconMemory(props: IconProps) {
+  const { size = 16, ...rest } = props;
+  return (
+    <svg {...svgProps(size, rest)}>
+      <path d="M7 4h10a1.5 1.5 0 0 1 1.5 1.5V20L12 16.4 5.5 20V5.5A1.5 1.5 0 0 1 7 4Z" />
+      <path d="M9.5 8.5h5" />
+    </svg>
+  );
+}
+
+export function IconSearch(props: IconProps) {
+  const { size = 16, ...rest } = props;
+  return (
+    <svg {...svgProps(size, rest)}>
+      <circle cx="11" cy="11" r="6" />
+      <path d="m15.6 15.6 4 4" />
+    </svg>
+  );
+}
+
+export function IconChevronDown(props: IconProps) {
+  const { size = 16, ...rest } = props;
+  return (
+    <svg {...svgProps(size, rest)}>
+      <path d="m6 9.5 6 6 6-6" />
+    </svg>
+  );
+}
+
+export function IconChevronRight(props: IconProps) {
+  const { size = 16, ...rest } = props;
+  return (
+    <svg {...svgProps(size, rest)}>
+      <path d="m9.5 6 6 6-6 6" />
+    </svg>
+  );
+}
+
+export function IconLock(props: IconProps) {
+  const { size = 16, ...rest } = props;
+  return (
+    <svg {...svgProps(size, rest)}>
+      <rect x="5" y="10.5" width="14" height="9.5" rx="2" />
+      <path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5" />
+    </svg>
+  );
+}
+
+/* --- Phase 7 — developer intelligence --- */
+
+export function IconRepo(props: IconProps) {
+  const { size = 16, ...rest } = props;
+  return (
+    <svg {...svgProps(size, rest)}>
+      <path d="M6.5 4h11a1.5 1.5 0 0 1 1.5 1.5v13a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 5 18.5v-13A1.5 1.5 0 0 1 6.5 4Z" />
+      <path d="M9 4v16" />
+      <path d="M12 9h4" />
+      <path d="M12 12.5h4" />
+    </svg>
+  );
+}
+
+export function IconBranch(props: IconProps) {
+  const { size = 16, ...rest } = props;
+  return (
+    <svg {...svgProps(size, rest)}>
+      <circle cx="7.5" cy="6" r="2.2" />
+      <circle cx="7.5" cy="18" r="2.2" />
+      <circle cx="16.5" cy="9" r="2.2" />
+      <path d="M7.5 8.2v7.6" />
+      <path d="M16.5 11.2c0 2.6-2.4 3.4-4.6 3.9" />
+    </svg>
+  );
+}
+
+export function IconCode(props: IconProps) {
+  const { size = 16, ...rest } = props;
+  return (
+    <svg {...svgProps(size, rest)}>
+      <path d="m9 8.5-3.5 3.5L9 15.5" />
+      <path d="m15 8.5 3.5 3.5L15 15.5" />
+    </svg>
+  );
+}
+
+export function IconPullRequest(props: IconProps) {
+  const { size = 16, ...rest } = props;
+  return (
+    <svg {...svgProps(size, rest)}>
+      <circle cx="7" cy="6" r="2.2" />
+      <circle cx="7" cy="18" r="2.2" />
+      <circle cx="17" cy="18" r="2.2" />
+      <path d="M7 8.2v7.6" />
+      <path d="M9.4 6h4.1a3.5 3.5 0 0 1 3.5 3.5v6.1" />
+    </svg>
+  );
+}
+
+export function IconIssue(props: IconProps) {
+  const { size = 16, ...rest } = props;
+  return (
+    <svg {...svgProps(size, rest)}>
+      <circle cx="12" cy="12" r="7.5" />
+      <path d="M12 8.4v.2" />
+      <path d="M12 11.4v4.4" />
+    </svg>
+  );
+}
+
+export function IconExternalLink(props: IconProps) {
+  const { size = 16, ...rest } = props;
+  return (
+    <svg {...svgProps(size, rest)}>
+      <path d="M13.5 5h5.5v5.5" />
+      <path d="M19 5l-7.5 7.5" />
+      <path d="M17 14.5V18a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 18V8.5A1.5 1.5 0 0 1 6 7h3.5" />
+    </svg>
+  );
+}
+
+export function IconTerminalCheck(props: IconProps) {
+  const { size = 16, ...rest } = props;
+  return (
+    <svg {...svgProps(size, rest)}>
+      <rect x="3.5" y="5" width="17" height="14" rx="2" />
+      <path d="m7 10 2.2 2L7 14" />
+      <path d="m12 15h5" />
     </svg>
   );
 }

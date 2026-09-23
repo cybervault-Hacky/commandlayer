@@ -23,6 +23,8 @@ interface Approval {
   approvalId: string;
   approvedAt: number;
   consumed: boolean;
+  /** Phase 5: the approved workflow that granted this step authorization. */
+  workflowId?: string;
 }
 
 class PermissionLedger {
@@ -46,6 +48,33 @@ class PermissionLedger {
       consumed: false,
     });
     return approvalId;
+  }
+
+  /**
+   * Phase 5 — grant the per-step authorization carried by an approved
+   * workflow. This is the ONLY way a step runs without a direct click:
+   * the workflow engine calls it right before executing one step whose
+   * actions were re-verified as hash-identical to the approved step.
+   *
+   * It does not weaken anything: the approval is still hash-bound,
+   * single-use, time-boxed, and consumed by the executor, which still
+   * enforces the state machine, page freshness, sensitive-field blocks,
+   * and the action allowlist.
+   */
+  approveForWorkflow(
+    planId: string,
+    planHash: string,
+    workflowId: string,
+  ): string {
+    const approvalId = this.approve(planId, planHash);
+    const approval = this.approvals.get(planId);
+    if (approval) approval.workflowId = workflowId;
+    return approvalId;
+  }
+
+  /** Provenance of one approval (audit/tests; never grants anything). */
+  workflowProvenanceFor(planId: string): string | undefined {
+    return this.approvals.get(planId)?.workflowId;
   }
 
   /**

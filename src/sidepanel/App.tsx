@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   APP_NAME,
   PHASE_LABEL,
@@ -12,6 +12,10 @@ import {
 import { usePageContext } from '@/shared/hooks/usePageContext';
 import { usePageIntelligence } from '@/shared/hooks/usePageIntelligence';
 import { useSettings } from '@/shared/hooks/useSettings';
+import { useWorkflowController } from '@/shared/hooks/useWorkflowController';
+import { useDeveloperContext } from '@/shared/hooks/useDeveloperContext';
+import { parseDeveloperResultView } from '@/developer/validator';
+import { WorkflowStatus } from '@/workflows/types';
 import { BrandMark, IconSettings } from '@/shared/components/icons';
 import { AIResponseCard } from '@/shared/components/AIResponseCard';
 import { ActionPreviewCard } from '@/shared/components/ActionPreviewCard';
@@ -20,17 +24,24 @@ import { CommandInput } from '@/shared/components/CommandInput';
 import { CurrentPageCard } from '@/shared/components/CurrentPageCard';
 import { PageInsightCard } from '@/shared/components/PageInsightCard';
 import { QuickActions } from '@/shared/components/QuickActions';
+import { WorkflowPreviewCard } from '@/shared/components/WorkflowPreviewCard';
+import { WorkflowProgressCard } from '@/shared/components/WorkflowProgressCard';
+import { MemoryPreviewCard } from '@/shared/components/MemoryPreviewCard';
+import { MemoryResultCard } from '@/shared/components/MemoryResultCard';
+import { DeveloperModeView } from './components/DeveloperModeView';
 import { SettingsView } from './components/SettingsView';
+import { MemoryView } from './components/MemoryView';
 import { FirstRunTip } from './components/FirstRunTip';
 
-type PanelView = 'home' | 'settings';
+type PanelView = 'home' | 'settings' | 'memory';
 
 /**
  * Phase 4: the Side Panel is the CommandLayer intelligence + safe action
  * interface.
  *
  * Hero → command box → quick actions → [reasoning response | action
- * preview | execution progress] → current page insight.
+ * preview | execution progress | memory confirmation] → current page
+ * insight. Settings hosts the Phase 6 memory manager.
  *
  * Every action follows PREVIEW → PERMISSION → EXECUTE → VERIFY: nothing
  * runs from a plain command, and approval is an explicit button press.
@@ -39,14 +50,22 @@ export function App() {
   const { settings, update } = useSettings();
   const { context, loading: pageLoading, refresh } = usePageContext();
   const { insight, capturing, capture } = usePageIntelligence(context);
+  // Phase 7: Developer Mode reads one bounded capture on GitHub pages only
+  // (URL-first — a non-GitHub page never triggers a capture).
+  const developer = useDeveloperContext(settings.developerMode, context?.url);
   const [view, setView] = useState<PanelView>('home');
   const [draft, setDraft] = useState('');
   /** The plan currently being executed (preview → progress binding). */
   const [executingPlan, setExecutingPlan] = useState<ActionPlan | null>(null);
 
+  // Phase 5: an approved workflow runs in the background; the panel shows
+  // its bounded preview, step progress, and result.
+  const workflow = useWorkflowController(CommandSource.SidePanel);
+
   // Successful free-text commands clear the draft.
   const pipeline = useCommandPipeline(CommandSource.SidePanel, (result) => {
     if (result.status === 'completed' && !result.execution) setDraft('');
+    if (result.workflow) workflow.open(result.workflow);
   });
 
   const processing = pipeline.phase === 'processing';
@@ -54,15 +73,17 @@ export function App() {
 
   const handleSubmit = useCallback(() => {
     setExecutingPlan(null);
+    workflow.dismiss();
     void pipeline.submitText(draft);
-  }, [pipeline, draft]);
+  }, [pipeline, draft, workflow]);
 
   const handleQuickAction = useCallback(
     (action: QuickAction) => {
       setExecutingPlan(null);
+      workflow.dismiss();
       void pipeline.submitQuickAction(action.id);
     },
-    [pipeline],
+    [pipeline, workflow],
   );
 
   const handleApprove = useCallback(
@@ -83,17 +104,45 @@ export function App() {
 
   const handleClear = useCallback(() => {
     setExecutingPlan(null);
+    workflow.dismiss();
     pipeline.reset();
-  }, [pipeline]);
+  }, [pipeline, workflow]);
 
   // Which card owns the command slot?
   const execution = result?.execution ?? null;
+  // Phase 7 — a developer result is validated before it is rendered, and its
+  // plan (when it has one) is rendered inside the change-plan card instead of
+  // the generic action preview.
+  const developerResult = useMemo(() => {
+    if (!result?.developer) return null;
+    return parseDeveloperResultView(result.developer);
+  }, [result]);
   const previewPlan =
-    result?.plan && !execution && pipeline.phase !== 'processing'
+    result?.plan &&
+    !execution &&
+    !developerResult &&
+    pipeline.phase !== 'processing'
       ? result.plan
       : null;
+  // Phase 7 — a developer command's plan is the typed GitHub navigation the
+  // dispatcher produced for THIS result. It is rendered by the change-plan
+  // card (not the generic preview above), and it is still only a plan: the
+  // Action Engine executes it after approval and nothing else.
+  const developerPlan = developerResult ? (result?.plan ?? null) : null;
   const runningPlan = processing && executingPlan ? executingPlan : null;
-  const showReasoningCard = !execution && !previewPlan && !runningPlan;
+  const activeWorkflow = workflow.workflow;
+  // Phase 6 — a memory change is never applied from a command: it waits
+  // for an explicit confirmation here.
+  const memoryPreview = result?.memory ?? null;
+  const memoryResult = result?.memoryResult ?? null;
+  const showReasoningCard =
+    !activeWorkflow &&
+    !execution &&
+    !previewPlan &&
+    !runningPlan &&
+    !memoryPreview &&
+    !memoryResult &&
+    !developerResult;
 
   return (
     <div className="cl-app h-full overflow-y-auto">
@@ -141,6 +190,30 @@ export function App() {
                 placeholder="Ask, or say “find …”, “scroll …”, “click …”"
               />
 
+              {activeWorkflow &&
+                (activeWorkflow.status === WorkflowStatus.AwaitingApproval ? (
+                  <WorkflowPreviewCard
+                    workflow={activeWorkflow}
+                    onApprove={() => void workflow.approve()}
+                    onCancel={() => workflow.dismiss()}
+                    notice={workflow.notice}
+                  />
+                ) : (
+                  <WorkflowProgressCard
+                    workflow={activeWorkflow}
+                    run={workflow.run}
+                    running={
+                      workflow.phase === 'working' ||
+                      workflow.phase === 'running'
+                    }
+                    onPause={() => void workflow.pause()}
+                    onResume={() => void workflow.resume()}
+                    onCancel={() => void workflow.cancel()}
+                    onOpenFollowUp={(followUp) => workflow.open(followUp)}
+                    notice={workflow.notice}
+                  />
+                ))}
+
               {runningPlan && (
                 <ActionProgressCard
                   plan={runningPlan}
@@ -158,6 +231,22 @@ export function App() {
                   }
                   execution={execution}
                 />
+              )}
+
+              {memoryPreview && (
+                <MemoryPreviewCard
+                  preview={memoryPreview}
+                  onConfirm={() => {
+                    void pipeline.confirmMemory(memoryPreview.previewId);
+                  }}
+                  onCancel={() => {
+                    pipeline.cancelMemory(memoryPreview.previewId);
+                  }}
+                />
+              )}
+
+              {!memoryPreview && memoryResult && (
+                <MemoryResultCard result={memoryResult} onDismiss={handleClear} />
               )}
 
               {previewPlan && (
@@ -179,7 +268,31 @@ export function App() {
               )}
             </section>
 
-            <section className="cl-enter mt-4" style={{ animationDelay: '120ms' }}>
+            {settings.developerMode && developer.isGitHubPage && (
+              <section
+                className="cl-enter mt-4"
+                style={{ animationDelay: '120ms' }}
+                aria-label="Developer context"
+              >
+                <DeveloperModeView
+                  github={developer.github}
+                  loading={developer.loading}
+                  result={developerResult}
+                  actionPlan={developerPlan}
+                  execution={developerResult && execution ? execution : null}
+                  running={Boolean(developerResult && runningPlan)}
+                  onApprove={() => {
+                    if (developerPlan) handleApprove(developerPlan);
+                  }}
+                  onCancel={() => {
+                    if (developerPlan) handleCancelPlan(developerPlan);
+                  }}
+                  onDismissResult={handleClear}
+                />
+              </section>
+            )}
+
+            <section className="cl-enter mt-4" style={{ animationDelay: '160ms' }}>
               <QuickActions onSelect={handleQuickAction} disabled={processing} />
             </section>
 
@@ -225,7 +338,14 @@ export function App() {
             </footer>
           </>
         ) : (
-          <SettingsView onBack={() => setView('home')} />
+          view === 'settings' ? (
+            <SettingsView
+              onBack={() => setView('home')}
+              onOpenMemory={() => setView('memory')}
+            />
+          ) : (
+            <MemoryView onBack={() => setView('settings')} />
+          )
         )}
       </div>
     </div>

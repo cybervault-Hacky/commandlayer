@@ -19,8 +19,8 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: 'dist',
-    // The worker build runs first and writes dist/background.js; never wipe it.
+    outDir: 'extension',
+    // The worker build runs first and writes extension/background.js; never wipe it.
     emptyOutDir: false,
     target: 'es2022',
     sourcemap: false,

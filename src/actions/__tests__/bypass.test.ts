@@ -66,6 +66,7 @@ describe('no AI → executor path exists (Phase 4)', () => {
       sendStep: async () => ({ ok: true, result: { status: 'success', message: 'x' } }),
       captureContentHash: async () => '',
       readPage: async () => null,
+      navigateTo: async () => null,
     });
     expect(outcome.ok).toBe(false);
     if (!outcome.ok) expect(outcome.error.code).toBe('ACTION_PLAN_UNKNOWN');

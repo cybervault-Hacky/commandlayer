@@ -9,6 +9,7 @@ import type { ActionKind, ActionPlan } from '@/actions/types';
 import { cn } from '@/shared/utilities/cn';
 import {
   IconClickAction,
+  IconExternalLink,
   IconFindText,
   IconPlay,
   IconReadPage,
@@ -30,6 +31,7 @@ export interface ActionPreviewCardProps {
 
 const ACTION_ICONS: Record<ActionKind, (props: IconProps) => ReactElement> = {
   READ_PAGE: IconReadPage,
+  NAVIGATE_GITHUB: IconExternalLink,
   SCROLL: IconScrollAction,
   FIND_TEXT: IconFindText,
   CLICK_ELEMENT: IconClickAction,

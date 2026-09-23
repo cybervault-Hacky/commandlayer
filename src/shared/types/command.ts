@@ -2,6 +2,16 @@ import type { PageContext } from './page';
 import type { QuickActionId as QuickActionIdType } from '../constants/quickActions';
 import type { AIIntent, AIResponse } from '@/ai/types';
 import type { ActionPlan, ActionExecutionResult } from '@/actions/types';
+import type {
+  WorkflowRunResult,
+  WorkflowView,
+} from '@/workflows/types';
+import type {
+  MemoryPreviewView,
+  MemoryResultView,
+  MemoryUsedView,
+} from '@/memory/types';
+import type { DeveloperResultView } from '@/developer/types';
 
 export type QuickActionId = QuickActionIdType;
 
@@ -42,6 +52,23 @@ export interface CommandRequest {
   createdAt: string;
 }
 
+/**
+ * Phase 5 — deterministic task understanding, surfaced to the UI so the
+ * user can see what CommandLayer understood before anything is approved.
+ */
+export interface WorkflowUnderstandingView {
+  /** ACTION | WORKFLOW | REASONING | UNSUPPORTED */
+  kind: string;
+  goal: string;
+  expectedOutcome: string;
+  /** Ordered step intents the plan is expected to contain. */
+  intents: string[];
+  /** Page Intelligence sections the plan needed. */
+  contextRequirements: string[];
+  supported: boolean;
+  reason?: string;
+}
+
 /** The terminal result of a command, safe to render in the UI. */
 export interface CommandResult {
   id: string;
@@ -63,6 +90,35 @@ export interface CommandResult {
   plan?: ActionPlan;
   /** Phase 4 — the terminal outcome of an executed action plan. */
   execution?: ActionExecutionResult;
+  /**
+   * Phase 5 — a bounded multi-step workflow prepared for review (status
+   * is 'completed'; nothing has run) or the latest state of one that was
+   * approved and executed.
+   */
+  workflow?: WorkflowView;
+  /** Phase 5 — the bounded outcome of a workflow run that executed. */
+  workflowRun?: WorkflowRunResult;
+  /** Phase 5 — how the request was understood (deterministic analysis). */
+  understanding?: WorkflowUnderstandingView;
+  /**
+   * Phase 6 — a memory change awaiting the user's explicit confirmation
+   * (status is 'completed'; nothing has been stored yet).
+   */
+  memory?: MemoryPreviewView;
+  /** Phase 6 — the bounded outcome of a memory operation. */
+  memoryResult?: MemoryResultView;
+  /**
+   * Phase 6 — saved memories that were relevant to this command and were
+   * used as context (bounded, already-sanitized, user-owned data).
+   */
+  memoriesUsed?: MemoryUsedView[];
+  /**
+   * Phase 7 — the deterministic + model-assisted developer result for a
+   * developer command (typed, bounded, and re-validated before rendering).
+   * Any GitHub navigation it proposes travels separately in `plan`, through
+   * the Phase 4 approval flow.
+   */
+  developer?: DeveloperResultView;
   /** Whether a retry may succeed (transient errors only). */
   retryable?: boolean;
   errorCode?: string;

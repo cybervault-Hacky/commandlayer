@@ -3,6 +3,7 @@ import type { CommandPhase } from '@/shared/hooks/useCommandPipeline';
 import type { CommandResult } from '@/shared/types/command';
 import { INTENT_LABELS } from '@/ai/intents';
 import { cn } from '@/shared/utilities/cn';
+import { MemoryUsedNote } from './MemoryUsedNote';
 import { SafeMarkdown } from './SafeMarkdown';
 import {
   IconAlertTriangle,
@@ -227,6 +228,10 @@ export function AIResponseCard({
               ))}
             </ul>
           </div>
+        )}
+
+        {result.memoriesUsed && result.memoriesUsed.length > 0 && (
+          <MemoryUsedNote memories={result.memoriesUsed} />
         )}
 
         {result.ai && result.ai.requestId && (

@@ -1,7 +1,14 @@
 import type { CommandResult } from '@/shared/types/command';
+import { WorkflowStatus } from '@/workflows/types';
 import { AIResponseCard } from '@/shared/components/AIResponseCard';
 import { ActionPreviewCard } from '@/shared/components/ActionPreviewCard';
 import { ActionProgressCard } from '@/shared/components/ActionProgressCard';
+import { WorkflowPreviewCard } from '@/shared/components/WorkflowPreviewCard';
+import { WorkflowProgressCard } from '@/shared/components/WorkflowProgressCard';
+import { MemoryPreviewCard } from '@/shared/components/MemoryPreviewCard';
+import { MemoryResultCard } from '@/shared/components/MemoryResultCard';
+import { DeveloperChangePlanCard } from '@/shared/components/DeveloperChangePlanCard';
+import { DeveloperResultCard } from '@/shared/components/DeveloperResultCard';
 import { IconSparkle } from '@/shared/components/icons';
 
 export interface TranscriptUserTurn {
@@ -23,6 +30,14 @@ export type TranscriptEntry = TranscriptUserTurn | TranscriptAssistantTurn;
 export interface SessionTranscriptProps {
   entries: readonly TranscriptEntry[];
   onClear: () => void;
+  /**
+   * Phase 6 — the assistant turn whose memory preview is still pending.
+   * Only that turn renders interactive "Remember / Cancel" controls; older
+   * turns stay read-only.
+   */
+  liveMemoryEntryId?: string | null;
+  onMemoryConfirm?: (previewId: string) => void;
+  onMemoryCancel?: (previewId: string) => void;
 }
 
 function formatTime(iso: string): string {
@@ -41,7 +56,13 @@ function formatTime(iso: string): string {
  * tab: closing the Command Center clears it. Contains only validated
  * AI responses and the user's own prompts.
  */
-export function SessionTranscript({ entries, onClear }: SessionTranscriptProps) {
+export function SessionTranscript({
+  entries,
+  onClear,
+  liveMemoryEntryId = null,
+  onMemoryConfirm,
+  onMemoryCancel,
+}: SessionTranscriptProps) {
   return (
     <section className="cl-card flex flex-col p-4" aria-label="Session transcript">
       <div className="flex items-center justify-between">
@@ -82,14 +103,66 @@ export function SessionTranscript({ entries, onClear }: SessionTranscriptProps) 
             ) : (
               <li key={entry.id} className="flex justify-start">
                 <div className="w-full max-w-[92%]">
-                  {entry.result.execution ? (
+                  {entry.result.workflow ? (
+                    /* Phase 5: a workflow turn — bounded preview or the
+                     * result of an approved run (read-only in the log). */
+                    entry.result.workflow.status ===
+                    WorkflowStatus.AwaitingApproval ? (
+                      <WorkflowPreviewCard
+                        workflow={entry.result.workflow}
+                        onApprove={() => undefined}
+                        onCancel={() => undefined}
+                        readOnly
+                      />
+                    ) : (
+                      <WorkflowProgressCard
+                        workflow={entry.result.workflow}
+                        run={entry.result.workflowRun ?? null}
+                        readOnly
+                      />
+                    )
+                  ) : entry.result.memory ? (
+                    /* Phase 6: a memory proposal waits for the user's
+                     * explicit confirmation — the live turn is
+                     * interactive, older turns are read-only. */
+                    <MemoryPreviewCard
+                      preview={entry.result.memory}
+                      readOnly={entry.id !== liveMemoryEntryId}
+                      onConfirm={() => {
+                        onMemoryConfirm?.(entry.result.memory?.previewId ?? '');
+                      }}
+                      onCancel={() => {
+                        onMemoryCancel?.(entry.result.memory?.previewId ?? '');
+                      }}
+                    />
+                  ) : entry.result.memoryResult ? (
+                    /* Phase 6: "Memory saved." / "Memory deleted." */
+                    <MemoryResultCard result={entry.result.memoryResult} />
+                  ) : entry.result.developer ? (
+                    /* Phase 7: a developer turn — the analysed result, and
+                     * the change plan when one was produced (read-only in
+                     * the log: activation happens in the live surface). */
+                    <>
+                      <DeveloperResultCard result={entry.result.developer} />
+                      {entry.result.developer.plan && (
+                        <div className="mt-3">
+                          <DeveloperChangePlanCard
+                            result={entry.result.developer}
+                            actionPlan={entry.result.plan ?? null}
+                            execution={entry.result.execution ?? null}
+                            readOnly
+                          />
+                        </div>
+                      )}
+                    </>
+                  ) : entry.result.execution ? (
                     /* Phase 4: executed plans render their verified
                      * outcome inline (read-only). */
                     <ActionProgressCard
                       plan={entry.result.plan ?? null}
                       execution={entry.result.execution}
                     />
-                  ) : entry.result.plan ? (
+                  ) : entry.result.plan && !entry.result.developer ? (
                     /* Proposed but not executed: read-only preview. */
                     <ActionPreviewCard
                       plan={entry.result.plan}

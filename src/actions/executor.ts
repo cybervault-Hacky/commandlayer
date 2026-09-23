@@ -24,6 +24,7 @@ import {
   buildExecuteActionRequest,
   isContentActionResponse,
 } from './protocol';
+import { buildGitHubUrl, describeNavTarget, type GitHubNavTarget } from '@/github/patterns';
 import { describeTarget } from './targets';
 import {
   ActionErrorCode,
@@ -52,10 +53,22 @@ export interface ExecutorEnvironment {
     tabId: number,
     message: unknown,
   ): Promise<unknown>;
-  /** Re-capture a minimal context hash for freshness validation. */
-  captureContentHash(): Promise<string>;
+  /**
+   * Re-capture a context hash for freshness validation. The plan is passed so
+   * the capture uses the SAME section set the plan was bound against: a plan
+   * whose navigation depends on the GitHub structure of the page must be
+   * re-checked against that structure, not against a smaller profile (which
+   * would report every such plan as stale, or worse, miss a real change).
+   */
+  captureContentHash(plan: ActionPlan): Promise<string>;
   /** READ_PAGE: reuse Phase 2 Page Intelligence (no second engine). */
   readPage(): Promise<ReadPageData | null>;
+  /**
+   * NAVIGATE_GITHUB: load a URL that the TRUSTED builder produced from a
+   * validated typed target. The environment returns the URL it actually
+   * opened, or null when the tab could not be updated.
+   */
+  navigateTo(tabId: number, target: GitHubNavTarget): Promise<{ url: string } | null>;
 }
 
 /**
@@ -113,7 +126,7 @@ export async function executePlan(
 
   // 6. Freshness: content hash must still match (target pages only).
   if (requiresTargetValidation(plan)) {
-    const freshHash = await env.captureContentHash();
+    const freshHash = await env.captureContentHash(plan);
     if (freshHash !== plan.contentHash) {
       actionSessionStore.apply(planId, ActionEvent.Stale);
       actionSessionStore.dispose(planId);
@@ -197,12 +210,19 @@ export async function executePlan(
   return { ok: true, result };
 }
 
+/**
+ * Steps whose meaning depends on the page the plan was built against:
+ * element-targeting actions (the element must still be there and still be the
+ * same page) and Phase 7 GitHub navigation (a page that changed under the same
+ * URL is treated as stale, exactly like Phase 5 — re-plan rather than act).
+ */
 function requiresTargetValidation(plan: ActionPlan): boolean {
   return plan.actions.some(
     (s) =>
       s.action.type === 'CLICK_ELEMENT' ||
       s.action.type === 'TYPE_TEXT' ||
-      s.action.type === 'SELECT_OPTION',
+      s.action.type === 'SELECT_OPTION' ||
+      s.action.type === 'NAVIGATE_GITHUB',
   );
 }
 
@@ -229,6 +249,13 @@ async function runStep(
   // environment — no DOM mutation, no second extraction engine.
   if (kind === 'READ_PAGE') {
     return runReadPageStep(step, env);
+  }
+
+  // NAVIGATE_GITHUB runs in the BACKGROUND: the destination is rebuilt from
+  // the validated typed target here, at execution time, and the page never
+  // navigates itself (no arbitrary URL, no model-authored destination).
+  if (kind === 'NAVIGATE_GITHUB') {
+    return runNavigateStep(step, tabId, env);
   }
 
   let raw: unknown;
@@ -272,6 +299,55 @@ async function runStep(
     message: safeMessage(result.message),
     ...(result.verification ? { verification: result.verification } : {}),
     ...(result.data ? { data: result.data } : {}),
+    durationMs: 0,
+  };
+}
+
+async function runNavigateStep(
+  step: PlannedAction,
+  tabId: number,
+  env: ExecutorEnvironment,
+): Promise<ActionStepResult> {
+  const action = step.action;
+  if (action.type !== 'NAVIGATE_GITHUB') {
+    return {
+      actionId: step.stepId,
+      kind: step.action.type,
+      status: 'blocked',
+      message: 'That action is not supported in this version.',
+      durationMs: 0,
+    };
+  }
+
+  // Rebuild (never trust a carried URL) and refuse anything that is not a
+  // well-formed github.com destination.
+  const url = buildGitHubUrl(action.target);
+  if (url === null) {
+    return {
+      actionId: step.stepId,
+      kind: action.type,
+      status: 'blocked',
+      message: 'That destination is not a supported GitHub location.',
+      durationMs: 0,
+    };
+  }
+
+  const opened = await env.navigateTo(tabId, action.target);
+  if (!opened || opened.url !== url) {
+    return {
+      actionId: step.stepId,
+      kind: action.type,
+      status: 'failed',
+      message: 'The tab could not be moved to that GitHub location.',
+      durationMs: 0,
+    };
+  }
+
+  return {
+    actionId: step.stepId,
+    kind: action.type,
+    status: 'success',
+    message: `Opened ${describeNavTarget(action.target)}.`,
     durationMs: 0,
   };
 }

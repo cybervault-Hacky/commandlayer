@@ -3,11 +3,14 @@ import { actionRegistry } from '../registry';
 import { ActionKind, ActionRisk } from '../types';
 
 describe('action registry — fixed risk allowlist (Phase 4)', () => {
-  it('registers exactly the Phase 4 action kinds', () => {
+  it('registers exactly the allowlisted action kinds', () => {
+    // Phase 7 adds exactly ONE kind: typed GitHub navigation. Everything
+    // else about the allowlist is unchanged.
     expect([...actionRegistry.registeredKinds()].sort()).toEqual(
       [
         'CLICK_ELEMENT',
         'FIND_TEXT',
+        'NAVIGATE_GITHUB',
         'READ_PAGE',
         'SCROLL',
         'SELECT_OPTION',
@@ -23,6 +26,10 @@ describe('action registry — fixed risk allowlist (Phase 4)', () => {
     expect(actionRegistry.riskOf(ActionKind.ClickElement)).toBe(ActionRisk.Confirmation);
     expect(actionRegistry.riskOf(ActionKind.TypeText)).toBe(ActionRisk.Confirmation);
     expect(actionRegistry.riskOf(ActionKind.SelectOption)).toBe(ActionRisk.Confirmation);
+    // Navigation always requires confirmation: it changes what the user sees.
+    expect(actionRegistry.riskOf(ActionKind.NavigateGitHub)).toBe(
+      ActionRisk.Confirmation,
+    );
   });
 
   it('does not register anything executable beyond the allowlist', () => {
@@ -50,6 +57,10 @@ describe('action registry — fixed risk allowlist (Phase 4)', () => {
   it('produces non-empty previews for every registered kind', () => {
     const samples: Record<ActionKind, unknown> = {
       READ_PAGE: { type: 'READ_PAGE' },
+      NAVIGATE_GITHUB: {
+        type: 'NAVIGATE_GITHUB',
+        target: { kind: 'repository', owner: 'octocat', repository: 'hello-world' },
+      },
       SCROLL: { type: 'SCROLL', direction: 'down' },
       FIND_TEXT: { type: 'FIND_TEXT', query: 'alpha' },
       CLICK_ELEMENT: { type: 'CLICK_ELEMENT', target: { kind: 'text', text: 'Go' } },

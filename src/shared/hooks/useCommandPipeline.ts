@@ -13,6 +13,7 @@ import { sendMessage } from '@/shared/messaging/client';
 import type { ActionPlan } from '@/actions/types';
 import type { CommandSource, QuickActionId } from '@/shared/types/command';
 import type { CommandResult } from '@/shared/types/command';
+import type { WorkflowView } from '@/workflows/types';
 import type { MessageResult } from '@/shared/types/message';
 
 export type CommandPhase = 'idle' | 'processing' | 'completed' | 'failed';
@@ -36,6 +37,29 @@ export interface UseCommandPipelineResult extends PipelineState {
   executePlan: (plan: ActionPlan) => Promise<void>;
   /** Withdraw approval for a pending plan (Cancel button / Escape). */
   cancelPlan: (planId: string) => Promise<void>;
+  /**
+   * Phase 5 — approve the EXACT workflow the user reviewed. Only the
+   * workflow id and its hash cross the boundary; the background re-checks
+   * the hash, the approval TTL, the tab binding, and the one-workflow-per
+   * -tab rule before the first step runs.
+   */
+  approveWorkflow: (workflow: WorkflowView) => Promise<void>;
+  /** Pause a running workflow: no further step starts. */
+  pauseWorkflow: (workflowId: string) => Promise<void>;
+  /** Resume a paused workflow under the SAME approval and hash. */
+  resumeWorkflow: (workflow: WorkflowView) => Promise<void>;
+  /** Cancel: no future step may start (an in-flight step may finish). */
+  cancelWorkflow: (workflowId: string) => Promise<void>;
+  /** Read-only status refresh (bounded UI progress polling). */
+  refreshWorkflow: (workflowId: string) => Promise<void>;
+  /**
+   * Phase 6 — commit ONE pending memory preview. Only the preview id
+   * crosses the boundary; the background re-validates the policy and the
+   * limits at commit time and stays the only writer.
+   */
+  confirmMemory: (previewId: string) => Promise<void>;
+  /** Withdraw a pending memory preview — nothing was stored. */
+  cancelMemory: (previewId: string) => Promise<void>;
   /** Re-run the last submitted command (enabled only when retryable). */
   retry: () => Promise<void>;
   reset: () => void;
@@ -151,11 +175,70 @@ export function useCommandPipeline(
     [run, source],
   );
 
+  const approveWorkflow = useCallback(
+    (workflow: WorkflowView) =>
+      run(() =>
+        sendMessage(MessageType.WORKFLOW_APPROVE, {
+          workflowId: workflow.workflowId,
+          workflowHash: workflow.workflowHash,
+          source,
+        }),
+      ),
+    [run, source],
+  );
+
+  const pauseWorkflow = useCallback(
+    (workflowId: string) =>
+      run(() => sendMessage(MessageType.WORKFLOW_PAUSE, { workflowId })),
+    [run],
+  );
+
+  const resumeWorkflow = useCallback(
+    (workflow: WorkflowView) =>
+      run(() =>
+        sendMessage(MessageType.WORKFLOW_RESUME, {
+          workflowId: workflow.workflowId,
+          workflowHash: workflow.workflowHash,
+        }),
+      ),
+    [run],
+  );
+
+  const cancelWorkflow = useCallback(
+    (workflowId: string) =>
+      run(() => sendMessage(MessageType.WORKFLOW_CANCEL, { workflowId })),
+    [run],
+  );
+
+  const refreshWorkflow = useCallback(
+    (workflowId: string) =>
+      run(() => sendMessage(MessageType.WORKFLOW_STATUS, { workflowId })),
+    [run],
+  );
+
+  const confirmMemory = useCallback(
+    (previewId: string) =>
+      run(() =>
+        sendMessage(MessageType.MEMORY_CONFIRM, { previewId, source }),
+      ),
+    [run, source],
+  );
+
   const reset = useCallback(() => {
     runSeqRef.current += 1;
     lastExecuteRef.current = null;
     setState({ phase: 'idle', result: null, errorMessage: null });
   }, []);
+
+  const cancelMemory = useCallback(
+    async (previewId: string) => {
+      // Fire-and-forget withdrawal: the preview simply stops being
+      // pending, and the UI clears the confirmation card.
+      void sendMessage(MessageType.MEMORY_CANCEL, { previewId });
+      reset();
+    },
+    [reset],
+  );
 
   const cancelPlan = useCallback(
     async (planId: string) => {
@@ -181,6 +264,13 @@ export function useCommandPipeline(
     submitQuickAction,
     executePlan,
     cancelPlan,
+    approveWorkflow,
+    pauseWorkflow,
+    resumeWorkflow,
+    cancelWorkflow,
+    refreshWorkflow,
+    confirmMemory,
+    cancelMemory,
     retry,
     reset,
   };

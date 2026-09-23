@@ -39,6 +39,8 @@ describe('mock provider (Phase 3, deterministic, zero-config default)', () => {
     }
   });
 
+  // Phase 7 added the developer intents to the same taxonomy, so the loop is
+  // simply longer (each request costs the mock provider's fixed latency).
   it('grounds each intent in the supplied context (never invents pages)', async () => {
     for (const intent of Object.values(AIIntent)) {
       const request = makeAIRequest({ intent });
@@ -49,7 +51,7 @@ describe('mock provider (Phase 3, deterministic, zero-config default)', () => {
         expect((result.answer ?? '').toLowerCase()).toContain('climate report 2026');
       }
     }
-  });
+  }, 30000);
 
   it('echoes the user prompt for ANSWER so stale responses are detectable', async () => {
     const a = await mockAIProvider.generate(

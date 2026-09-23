@@ -8,6 +8,7 @@
  * classification.
  */
 import type { QuickActionId } from '@/shared/types/command';
+import { DEVELOPER_INTENT_LABELS } from '@/developer/intents';
 import { AIIntent } from './types';
 
 export const INTENT_ORDER: AIIntent[] = [
@@ -24,6 +25,8 @@ export const INTENT_LABELS: Record<AIIntent, string> = {
   [AIIntent.Explain]: 'Explain',
   [AIIntent.Extract]: 'Extract',
   [AIIntent.Answer]: 'Answer',
+  // Phase 7 — developer labels are owned by the developer domain.
+  ...DEVELOPER_INTENT_LABELS,
 };
 
 /**

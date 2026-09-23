@@ -13,13 +13,19 @@
  *
  * Nothing parsed by parser.ts is trusted until this module approves it.
  */
+import { isSafeRepoPath } from '@/github/patterns';
 import { parseSafeUrl } from '@/shared/security/url';
 import { AI_LIMITS } from './limits';
 import { aiError } from './errors';
 import {
   AIErrorCode,
+  FindingCategory,
+  FindingConfidence,
+  FindingSeverity,
   isAIIntent,
+  type AIChangePlan,
   type AIError,
+  type AIFinding,
   type AIRequest,
   type AIResponse,
   type AIResponseCandidate,
@@ -37,7 +43,19 @@ const ALLOWED_FIELDS: ReadonlySet<string> = new Set([
   'answer',
   'sections',
   'sources',
+  // Phase 7 — developer results (validated strictly, see below).
+  'findings',
+  'changePlan',
 ]);
+
+/**
+ * Phase 7 — wording guard. A finding that asserts certainty is DISCARDED:
+ * the brief (and honest engineering) allow "potential issue", "worth
+ * checking", "this may…", "evidence suggests…" — never "this is definitely a
+ * bug". This is enforced, not merely requested in the prompt.
+ */
+const CERTAINTY_CLAIM =
+  /\b(definitely|certainly|guaranteed|guarantees?|undeniably|without (?:a )?doubt|proves that|proof that|will always|must be a bug|is a bug|is broken|is wrong at line)\b/i;
 
 /**
  * Validate a parsed candidate against the originating request.
@@ -93,6 +111,17 @@ export function validateAIResponse(
     return { ok: false, error: aiError(AIErrorCode.AI_INVALID_RESPONSE) };
   }
 
+  // Phase 7 — findings are filtered per item (an invalid finding is dropped,
+  // never rendered), while a change plan is all-or-nothing.
+  const findings = validateFindings(candidate.findings);
+  if (findings === null) {
+    return { ok: false, error: aiError(AIErrorCode.AI_INVALID_RESPONSE) };
+  }
+  const changePlan = validateChangePlan(candidate.changePlan);
+  if (changePlan === undefined) {
+    return { ok: false, error: aiError(AIErrorCode.AI_INVALID_RESPONSE) };
+  }
+
   return {
     ok: true,
     response: {
@@ -102,10 +131,152 @@ export function validateAIResponse(
       answer,
       sections,
       sources,
+      findings,
+      changePlan,
       provider: providerId,
       finishedAt: new Date().toISOString(),
     },
   };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function onlyKeys(record: Record<string, unknown>, allowed: readonly string[]): boolean {
+  const set = new Set(allowed);
+  return Object.keys(record).every((key) => set.has(key));
+}
+
+function isClosedValue<T extends string>(
+  values: Record<string, T>,
+  value: unknown,
+): value is T {
+  return typeof value === 'string' && Object.values(values).includes(value as T);
+}
+
+/**
+ * Validate the untrusted findings array. Returns [] when absent, null when
+ * the field exists but is not an array / is oversized (a contract violation),
+ * and otherwise the individually-validated findings.
+ */
+function validateFindings(value: unknown): AIFinding[] | null {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) return null;
+  if (value.length > AI_LIMITS.MAX_FINDINGS) return null;
+  const out: AIFinding[] = [];
+  for (const entry of value) {
+    const finding = parseFinding(entry);
+    if (finding !== null) out.push(finding);
+  }
+  return out;
+}
+
+function parseFinding(value: unknown): AIFinding | null {
+  if (!isRecord(value)) return null;
+  if (
+    !onlyKeys(value, [
+      'severity',
+      'category',
+      'file',
+      'line',
+      'explanation',
+      'evidence',
+      'confidence',
+    ])
+  ) {
+    return null;
+  }
+  if (!isClosedValue(FindingSeverity, value.severity)) return null;
+  if (!isClosedValue(FindingCategory, value.category)) return null;
+  if (!isClosedValue(FindingConfidence, value.confidence)) return null;
+
+  let file: string | null = null;
+  if (value.file !== undefined && value.file !== null) {
+    if (typeof value.file !== 'string' || !isSafeRepoPath(value.file)) return null;
+    file = value.file;
+  }
+
+  let line: number | null = null;
+  if (value.line !== undefined && value.line !== null) {
+    if (
+      typeof value.line !== 'number' ||
+      !Number.isInteger(value.line) ||
+      value.line < 1 ||
+      value.line > 5_000_000
+    ) {
+      return null;
+    }
+    line = value.line;
+  }
+
+  const explanation = cleanText(String(value.explanation ?? ''), AI_LIMITS.MAX_FINDING_TEXT);
+  if (explanation === null) return null;
+  // Evidence is REQUIRED: a finding without evidence is not a finding.
+  const evidence = cleanText(String(value.evidence ?? ''), AI_LIMITS.MAX_FINDING_TEXT);
+  if (evidence === null) return null;
+  if (CERTAINTY_CLAIM.test(explanation) || CERTAINTY_CLAIM.test(evidence)) return null;
+
+  return {
+    severity: value.severity,
+    category: value.category,
+    file,
+    line,
+    explanation,
+    evidence,
+    confidence: value.confidence,
+  };
+}
+
+/** undefined = field absent (fine); null = present but rejected. */
+function validateChangePlan(value: unknown): AIChangePlan | null | undefined {
+  if (value === undefined || value === null) return null;
+  if (!isRecord(value)) return undefined;
+  if (!onlyKeys(value, ['summary', 'steps'])) return undefined;
+
+  const summary = cleanText(String(value.summary ?? ''), AI_LIMITS.MAX_FINDING_TEXT);
+  if (summary === null) return undefined;
+
+  const steps = value.steps;
+  if (!Array.isArray(steps) || steps.length === 0) return undefined;
+  if (steps.length > AI_LIMITS.MAX_CHANGE_PLAN_STEPS) return undefined;
+
+  const parsedSteps: AIChangePlan['steps'] = [];
+  for (const step of steps) {
+    if (!isRecord(step) || !onlyKeys(step, ['title', 'detail', 'files'])) {
+      return undefined;
+    }
+    const title = cleanText(String(step.title ?? ''), AI_LIMITS.MAX_CHANGE_PLAN_TITLE);
+    if (title === null) return undefined;
+
+    let detail: string | undefined;
+    if (step.detail !== undefined) {
+      const parsed = cleanText(String(step.detail), AI_LIMITS.MAX_CHANGE_PLAN_DETAIL);
+      if (parsed === null) return undefined;
+      detail = parsed;
+    }
+
+    let files: string[] | undefined;
+    if (step.files !== undefined) {
+      if (!Array.isArray(step.files) || step.files.length > AI_LIMITS.MAX_CHANGE_PLAN_FILES) {
+        return undefined;
+      }
+      const parsedFiles: string[] = [];
+      for (const file of step.files) {
+        if (typeof file !== 'string' || !isSafeRepoPath(file)) return undefined;
+        parsedFiles.push(file);
+      }
+      files = parsedFiles;
+    }
+
+    parsedSteps.push({
+      title,
+      ...(detail !== undefined ? { detail } : {}),
+      ...(files !== undefined ? { files } : {}),
+    });
+  }
+
+  return { summary, steps: parsedSteps };
 }
 
 // Intentional: stripping control characters from untrusted AI output.

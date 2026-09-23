@@ -17,6 +17,7 @@ import type {
   PageLink,
   PageTable,
 } from '@/shared/types/page';
+import { parseGitHubPageContext } from '@/github/validator';
 import { sanitizeText } from '@/shared/security/sanitize';
 import { parseSafeUrl } from '@/shared/security/url';
 import { PAGE_LIMITS } from './limits';
@@ -391,6 +392,15 @@ export function parsePageContext(payload: unknown): PageContext | null {
     const stats = parseStats(payload.contentStats);
     if (!stats) return null;
     result.contentStats = stats;
+  }
+
+  if (payload.github !== undefined) {
+    // Phase 7: the GitHub section is an ENRICHMENT. A section that cannot be
+    // validated is DROPPED (never trusted, never fatal) — the rest of the
+    // capture stays usable, and consumers report the GitHub context as
+    // unavailable rather than papering over it.
+    const github = parseGitHubPageContext(payload.github);
+    if (github) result.github = github;
   }
 
   result.truncated = payload.truncated === true;

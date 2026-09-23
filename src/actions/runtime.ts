@@ -63,6 +63,11 @@ export function executeActionStep(
       case 'READ_PAGE':
         // READ_PAGE executes in the background against PageContext.
         return fail(ActionErrorCode.ACTION_UNSUPPORTED);
+      case 'NAVIGATE_GITHUB':
+        // GitHub navigation executes in the background (chrome.tabs.update
+        // with a URL built from a validated typed target). The content script
+        // never navigates the tab.
+        return fail(ActionErrorCode.ACTION_UNSUPPORTED);
     }
   } catch {
     return fail(ActionErrorCode.ACTION_EXECUTION_FAILED);

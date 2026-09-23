@@ -53,6 +53,11 @@ function makeEnv(overrides: Partial<ExecutorEnvironment> = {}): ExecutorEnvironm
       stats: '1 headings',
       topHeadings: [],
     }),
+    navigateTo: async (tabId, target) => {
+      void tabId;
+      void target;
+      return null;
+    },
     ...overrides,
   };
 }

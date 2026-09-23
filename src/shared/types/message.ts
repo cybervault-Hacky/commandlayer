@@ -6,6 +6,12 @@ import type { PageContext, PageSection } from './page';
 import type { Settings, SettingsPatch } from './settings';
 import type { ExtensionStatus } from './status';
 import type { ErrorCode } from '../constants/errors';
+import type { MemoryKind } from '@/memory/types';
+import type {
+  MemoryRecordView,
+  MemoryResultView,
+  MemoryStatusView,
+} from '@/memory/types';
 
 /**
  * Every message in CommandLayer uses one envelope shape. The background
@@ -57,6 +63,73 @@ export interface ActionCancelPayload {
   planId: string;
 }
 
+/**
+ * Phase 5 — workflow payloads. Identity only: the workflow body, its
+ * approval, and the execution loop never cross this boundary.
+ */
+export interface WorkflowCreatePayload {
+  goal: string;
+  source: CommandSource;
+}
+
+export interface WorkflowApprovePayload {
+  workflowId: string;
+  /** The hash the user reviewed and approved. */
+  workflowHash: string;
+  source: CommandSource;
+}
+
+export interface WorkflowResumePayload {
+  workflowId: string;
+  workflowHash: string;
+}
+
+export interface WorkflowIdPayload {
+  workflowId: string;
+}
+
+/**
+ * Phase 6 — memory payloads.
+ *
+ * `MEMORY_CONFIRM` carries the preview id only: the memory body, its
+ * category, and its policy result stay in the background, exactly like the
+ * Phase 4 plan body and the Phase 5 workflow body.
+ */
+export interface MemoryConfirmPayload {
+  previewId: string;
+  source: CommandSource;
+}
+
+export interface MemoryCancelPayload {
+  previewId: string;
+}
+
+export interface MemoryListPayload {
+  query?: string;
+  kind?: MemoryKind;
+}
+
+/**
+ * Management-UI mutations. Both require an explicit `confirm: true`, so no
+ * code path can delete stored memory by accident or on a stray message.
+ */
+export interface MemoryDeletePayload {
+  memoryId: string;
+  confirm: true;
+}
+
+export interface MemoryClearAllPayload {
+  confirm: true;
+}
+
+/** Bounded, user-safe listing for the management UI. */
+export interface MemoryListView {
+  records: MemoryRecordView[];
+  total: number;
+  enabled: boolean;
+  storageAvailable: boolean;
+}
+
 export interface NoPayload {
   [key: string]: never;
 }
@@ -94,6 +167,54 @@ export interface MessageMap {
   [MessageType.ACTION_CANCEL]: {
     payload: ActionCancelPayload;
     result: { cancelled: true };
+  };
+  [MessageType.WORKFLOW_CREATE]: {
+    payload: WorkflowCreatePayload;
+    result: CommandResult;
+  };
+  [MessageType.WORKFLOW_APPROVE]: {
+    payload: WorkflowApprovePayload;
+    result: CommandResult;
+  };
+  [MessageType.WORKFLOW_PAUSE]: {
+    payload: WorkflowIdPayload;
+    result: CommandResult;
+  };
+  [MessageType.WORKFLOW_RESUME]: {
+    payload: WorkflowResumePayload;
+    result: CommandResult;
+  };
+  [MessageType.WORKFLOW_CANCEL]: {
+    payload: WorkflowIdPayload;
+    result: CommandResult;
+  };
+  [MessageType.WORKFLOW_STATUS]: {
+    payload: WorkflowIdPayload;
+    result: CommandResult;
+  };
+  [MessageType.MEMORY_STATUS]: {
+    payload: NoPayload;
+    result: MemoryStatusView;
+  };
+  [MessageType.MEMORY_LIST]: {
+    payload: MemoryListPayload;
+    result: MemoryListView;
+  };
+  [MessageType.MEMORY_CONFIRM]: {
+    payload: MemoryConfirmPayload;
+    result: CommandResult;
+  };
+  [MessageType.MEMORY_CANCEL]: {
+    payload: MemoryCancelPayload;
+    result: { cancelled: boolean };
+  };
+  [MessageType.MEMORY_DELETE]: {
+    payload: MemoryDeletePayload;
+    result: MemoryResultView;
+  };
+  [MessageType.MEMORY_CLEAR_ALL]: {
+    payload: MemoryClearAllPayload;
+    result: MemoryResultView;
   };
   [MessageType.OPEN_COMMAND_CENTER]: {
     payload: NoPayload;

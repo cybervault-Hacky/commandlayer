@@ -12,10 +12,14 @@ import {
 } from '@/shared/constants/quickActions';
 import { useCommandPipeline } from '@/shared/hooks/useCommandPipeline';
 import { usePageContext } from '@/shared/hooks/usePageContext';
+import { useWorkflowController } from '@/shared/hooks/useWorkflowController';
+import { WorkflowStatus } from '@/workflows/types';
 import { BrandMark } from '@/shared/components/icons';
 import { CommandInput } from '@/shared/components/CommandInput';
 import { CurrentPageCard } from '@/shared/components/CurrentPageCard';
 import { QuickActions } from '@/shared/components/QuickActions';
+import { WorkflowPreviewCard } from '@/shared/components/WorkflowPreviewCard';
+import { WorkflowProgressCard } from '@/shared/components/WorkflowProgressCard';
 import {
   SessionTranscript,
   type TranscriptEntry,
@@ -27,6 +31,10 @@ import {
  * Phase 3: a session-only reasoning transcript. User questions and the
  * validated AI answers accumulate here for the lifetime of the tab —
  * nothing is persisted anywhere.
+ *
+ * Phase 6: memory requests appear in the transcript too ("Memory saved.")
+ * and stay interactive while a confirmation is pending. The transcript is
+ * still session-only; saved memories live in Settings → Memory.
  */
 export function App() {
   const { context, loading: pageLoading, refresh } = usePageContext();
@@ -39,6 +47,10 @@ export function App() {
     setTranscript((prev) => [...prev, entry].slice(-COMMAND_LOG_LIMIT));
   }, []);
 
+  // Phase 5: the workflow card is driven by its own bounded controller;
+  // the transcript keeps the session-only record of every turn.
+  const workflow = useWorkflowController(CommandSource.CommandCenter);
+
   const pipeline = useCommandPipeline(
     CommandSource.CommandCenter,
     (result) => {
@@ -46,6 +58,7 @@ export function App() {
       const pendingId = pendingTurnIdRef.current;
       pendingTurnIdRef.current = null;
       if (result.status === 'completed') setDraft('');
+      if (result.workflow) workflow.open(result.workflow);
       appendTurn({
         kind: 'assistant',
         id: pendingId ? `${pendingId}-a` : result.id,
@@ -77,6 +90,8 @@ export function App() {
     submitUserTurn(text);
     void pipeline.submitText(text);
   }, [pipeline, draft, processing, submitUserTurn]);
+
+  const activeWorkflow = workflow.workflow;
 
   const handleQuickAction = useCallback(
     (action: QuickAction) => {
@@ -110,6 +125,9 @@ export function App() {
           <SessionTranscript
             entries={transcript}
             onClear={() => setTranscript([])}
+            liveMemoryEntryId={pipeline.result?.memory ? pipeline.result.id : null}
+            onMemoryConfirm={(previewId) => void pipeline.confirmMemory(previewId)}
+            onMemoryCancel={(previewId) => pipeline.cancelMemory(previewId)}
           />
         </section>
 
@@ -129,6 +147,36 @@ export function App() {
             />
           </div>
         </section>
+
+        {activeWorkflow && (
+          <section
+            className="cl-enter mt-5"
+            style={{ animationDelay: '130ms' }}
+            aria-label="Active workflow"
+          >
+            {activeWorkflow.status === WorkflowStatus.AwaitingApproval ? (
+              <WorkflowPreviewCard
+                workflow={activeWorkflow}
+                onApprove={() => void workflow.approve()}
+                onCancel={() => workflow.dismiss()}
+                notice={workflow.notice}
+              />
+            ) : (
+              <WorkflowProgressCard
+                workflow={activeWorkflow}
+                run={workflow.run}
+                running={
+                  workflow.phase === 'working' || workflow.phase === 'running'
+                }
+                onPause={() => void workflow.pause()}
+                onResume={() => void workflow.resume()}
+                onCancel={() => void workflow.cancel()}
+                onOpenFollowUp={(followUp) => workflow.open(followUp)}
+                notice={workflow.notice}
+              />
+            )}
+          </section>
+        )}
 
         <section
           className="cl-enter mt-5"

@@ -23,6 +23,14 @@ export interface ChromeStub {
      * simulate the content side override the implementation.
      */
     sendMessage: ReturnType<typeof vi.fn>;
+    /**
+     * Phase 7: GitHub navigation. The only thing that moves a tab is a
+     * validated, approved plan step, so tests can assert exactly what the
+     * Action Engine asked the browser to open (`update` records the URL).
+     */
+    update: ReturnType<typeof vi.fn>;
+    /** Phase 7: bounded settle-wait after navigation. */
+    get: ReturnType<typeof vi.fn>;
   };
   permissions: {
     contains: ReturnType<typeof vi.fn>;
@@ -48,6 +56,17 @@ export function readChromeStorage(key: string): unknown {
   return storageData[key];
 }
 
+/**
+ * Seed persisted records before the extension reads them (settings,
+ * memories). Call AFTER resetChromeStorage so the seed is what the code
+ * under test actually sees.
+ */
+export function seedChromeStorage(records: Record<string, unknown>): void {
+  for (const [key, value] of Object.entries(records)) {
+    storageData[key] = value;
+  }
+}
+
 export function createChromeStub(options: {
   activeTab?: { id?: number; title?: string; url?: string };
   version?: string;
@@ -69,6 +88,17 @@ export function createChromeStub(options: {
           ),
         ),
       ),
+      // Records every URL a validated action step opened (Phase 7).
+      update: vi.fn(async (tabId: number, info: { url?: string } = {}) => ({
+        id: tabId,
+        url: info.url ?? activeTab?.url,
+        status: 'complete',
+      })),
+      get: vi.fn(async (tabId: number) => ({
+        id: tabId,
+        url: activeTab?.url,
+        status: 'complete',
+      })),
     },
     permissions: {
       contains: vi.fn(async () => ({ hasPermission: true })),
