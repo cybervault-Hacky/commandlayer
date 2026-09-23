@@ -11,6 +11,7 @@ import type {
   MemoryResultView,
   MemoryUsedView,
 } from '@/memory/types';
+import type { DeveloperResultView } from '@/developer/types';
 
 export type QuickActionId = QuickActionIdType;
 
@@ -111,6 +112,13 @@ export interface CommandResult {
    * used as context (bounded, already-sanitized, user-owned data).
    */
   memoriesUsed?: MemoryUsedView[];
+  /**
+   * Phase 7 — the deterministic + model-assisted developer result for a
+   * developer command (typed, bounded, and re-validated before rendering).
+   * Any GitHub navigation it proposes travels separately in `plan`, through
+   * the Phase 4 approval flow.
+   */
+  developer?: DeveloperResultView;
   /** Whether a retry may succeed (transient errors only). */
   retryable?: boolean;
   errorCode?: string;

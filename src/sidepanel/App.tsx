@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   APP_NAME,
   PHASE_LABEL,
@@ -13,6 +13,8 @@ import { usePageContext } from '@/shared/hooks/usePageContext';
 import { usePageIntelligence } from '@/shared/hooks/usePageIntelligence';
 import { useSettings } from '@/shared/hooks/useSettings';
 import { useWorkflowController } from '@/shared/hooks/useWorkflowController';
+import { useDeveloperContext } from '@/shared/hooks/useDeveloperContext';
+import { parseDeveloperResultView } from '@/developer/validator';
 import { WorkflowStatus } from '@/workflows/types';
 import { BrandMark, IconSettings } from '@/shared/components/icons';
 import { AIResponseCard } from '@/shared/components/AIResponseCard';
@@ -26,6 +28,7 @@ import { WorkflowPreviewCard } from '@/shared/components/WorkflowPreviewCard';
 import { WorkflowProgressCard } from '@/shared/components/WorkflowProgressCard';
 import { MemoryPreviewCard } from '@/shared/components/MemoryPreviewCard';
 import { MemoryResultCard } from '@/shared/components/MemoryResultCard';
+import { DeveloperModeView } from './components/DeveloperModeView';
 import { SettingsView } from './components/SettingsView';
 import { MemoryView } from './components/MemoryView';
 import { FirstRunTip } from './components/FirstRunTip';
@@ -47,6 +50,9 @@ export function App() {
   const { settings, update } = useSettings();
   const { context, loading: pageLoading, refresh } = usePageContext();
   const { insight, capturing, capture } = usePageIntelligence(context);
+  // Phase 7: Developer Mode reads one bounded capture on GitHub pages only
+  // (URL-first — a non-GitHub page never triggers a capture).
+  const developer = useDeveloperContext(settings.developerMode, context?.url);
   const [view, setView] = useState<PanelView>('home');
   const [draft, setDraft] = useState('');
   /** The plan currently being executed (preview → progress binding). */
@@ -104,10 +110,25 @@ export function App() {
 
   // Which card owns the command slot?
   const execution = result?.execution ?? null;
+  // Phase 7 — a developer result is validated before it is rendered, and its
+  // plan (when it has one) is rendered inside the change-plan card instead of
+  // the generic action preview.
+  const developerResult = useMemo(() => {
+    if (!result?.developer) return null;
+    return parseDeveloperResultView(result.developer);
+  }, [result]);
   const previewPlan =
-    result?.plan && !execution && pipeline.phase !== 'processing'
+    result?.plan &&
+    !execution &&
+    !developerResult &&
+    pipeline.phase !== 'processing'
       ? result.plan
       : null;
+  // Phase 7 — a developer command's plan is the typed GitHub navigation the
+  // dispatcher produced for THIS result. It is rendered by the change-plan
+  // card (not the generic preview above), and it is still only a plan: the
+  // Action Engine executes it after approval and nothing else.
+  const developerPlan = developerResult ? (result?.plan ?? null) : null;
   const runningPlan = processing && executingPlan ? executingPlan : null;
   const activeWorkflow = workflow.workflow;
   // Phase 6 — a memory change is never applied from a command: it waits
@@ -120,7 +141,8 @@ export function App() {
     !previewPlan &&
     !runningPlan &&
     !memoryPreview &&
-    !memoryResult;
+    !memoryResult &&
+    !developerResult;
 
   return (
     <div className="cl-app h-full overflow-y-auto">
@@ -246,7 +268,31 @@ export function App() {
               )}
             </section>
 
-            <section className="cl-enter mt-4" style={{ animationDelay: '120ms' }}>
+            {settings.developerMode && developer.isGitHubPage && (
+              <section
+                className="cl-enter mt-4"
+                style={{ animationDelay: '120ms' }}
+                aria-label="Developer context"
+              >
+                <DeveloperModeView
+                  github={developer.github}
+                  loading={developer.loading}
+                  result={developerResult}
+                  actionPlan={developerPlan}
+                  execution={developerResult && execution ? execution : null}
+                  running={Boolean(developerResult && runningPlan)}
+                  onApprove={() => {
+                    if (developerPlan) handleApprove(developerPlan);
+                  }}
+                  onCancel={() => {
+                    if (developerPlan) handleCancelPlan(developerPlan);
+                  }}
+                  onDismissResult={handleClear}
+                />
+              </section>
+            )}
+
+            <section className="cl-enter mt-4" style={{ animationDelay: '160ms' }}>
               <QuickActions onSelect={handleQuickAction} disabled={processing} />
             </section>
 

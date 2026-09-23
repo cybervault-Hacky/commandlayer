@@ -5,6 +5,7 @@ import {
   type PageSection as Section,
 } from '@/shared/types/page';
 
+import { parseGitHubContext } from '@/github/parse';
 import { extractForms } from './forms';
 import { pageContentDigest } from './hash';
 import { extractHeadings } from './headings';
@@ -94,6 +95,22 @@ export function extractPageContext(
     context.selectedText = text;
     context.contentStats.selectedTextLength = text?.length ?? 0;
     truncated = truncated || t;
+  }
+
+  if (wanted.has(PageSection.GitHub)) {
+    // Phase 7: GitHub structure is an ENRICHMENT of the same single pass.
+    // It returns null for every non-GitHub page, and any failure inside the
+    // GitHub reader degrades to "no GitHub context" rather than a broken
+    // capture.
+    try {
+      const github = parseGitHubContext(doc, doc.location?.href ?? doc.URL);
+      if (github) {
+        context.github = github;
+        truncated = truncated || github.truncated;
+      }
+    } catch {
+      /* no GitHub context */
+    }
   }
 
   context.contentStats.paragraphCount = context.paragraphs.length;

@@ -1,3 +1,4 @@
+import type { GitHubNavTarget } from '@/github/patterns';
 /**
  * Phase 4 — Safe Action Engine: core contracts.
  *
@@ -14,6 +15,13 @@
 /** The closed allowlist of executable action kinds. Nothing else runs. */
 export const ActionKind = {
   ReadPage: 'READ_PAGE',
+  /**
+   * Phase 7 — GitHub navigation. The action carries a TYPED target (owner,
+   * repository, ref, path, number) that is re-validated at every boundary and
+   * turned into a URL by the trusted builder; it is never a raw URL string,
+   * never a model-authored destination, and never a mutation.
+   */
+  NavigateGitHub: 'NAVIGATE_GITHUB',
   Scroll: 'SCROLL',
   FindText: 'FIND_TEXT',
   ClickElement: 'CLICK_ELEMENT',
@@ -82,6 +90,12 @@ export interface TypeTextAction {
   text: string;
 }
 
+export interface NavigateGitHubAction {
+  type: typeof ActionKind.NavigateGitHub;
+  /** Validated typed target — see @/github/patterns.parseNavTarget. */
+  target: GitHubNavTarget;
+}
+
 export interface SelectOptionAction {
   type: typeof ActionKind.SelectOption;
   target: ElementTarget;
@@ -92,6 +106,7 @@ export interface SelectOptionAction {
 /** The closed union of executable actions. */
 export type Action =
   | ReadPageAction
+  | NavigateGitHubAction
   | ScrollAction
   | FindTextAction
   | ClickElementAction

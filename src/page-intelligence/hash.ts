@@ -27,6 +27,20 @@ export function pageContentDigest(context: PageContext): string {
     // Bounded fingerprints of leading content — not the full payload.
     context.paragraphs.slice(0, 5).join(' ').slice(0, 400),
     context.headings.slice(0, 10).map((h) => h.text).join(' ').slice(0, 300),
+    // Phase 7 — GitHub identity participates in freshness: the same URL can
+    // switch surface, ref, path, or pull request without the URL changing.
+    context.github
+      ? [
+          context.github.surface,
+          context.github.owner ?? '',
+          context.github.repository ?? '',
+          context.github.branch ?? '',
+          context.github.path ?? '',
+          context.github.commitSha ?? '',
+          String(context.github.pullRequestNumber ?? ''),
+          String(context.github.issueNumber ?? ''),
+        ].join('|')
+      : '',
   ];
   return fnv1a32(parts.join('\u0001'));
 }

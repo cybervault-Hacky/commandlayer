@@ -19,7 +19,7 @@ WebExtension APIs where practical.
 
 | | |
 | --- | --- |
-| **Version** | `0.5.0` — Phase 6 complete (Persistent Personal Memory) |
+| **Version** | `0.6.0` — Phase 7 complete (Developer Intelligence & GitHub Workflows) |
 | **Platform** | Microsoft Edge / Chromium, Manifest V3, `minimum_chrome_version: 116` |
 | **Publishable build** | [`extension/`](extension) — self-contained, no build step needed |
 | **Permissions** | `commands`, `sidePanel`, `storage`, `tabs` — no host permissions |
@@ -102,9 +102,11 @@ provider secrets never live in the extension.
 
 ### Safe Action Engine
 
-Six typed, bounded actions: read page, find text, scroll, click, type, select.
-Every action follows one pipeline — **Preview → Permission → Execute →
-Verify**:
+Seven typed, bounded actions: read page, find text, scroll, click, type,
+select, and GitHub navigation (open a repository, file, directory, commit,
+pull request, issue, or search result — built from validated identity fields,
+never from a raw URL string). Every action follows one pipeline —
+**Preview → Permission → Execute → Verify**:
 
 - actions are proposed by a deterministic planner, never invented by the model;
 - you see an explicit preview and approve the *exact* plan;
@@ -160,12 +162,54 @@ intentional, never automatic:
   not encrypted at rest for extensions; CommandLayer does not pretend
   otherwise. See [`docs/memory.md`](docs/memory.md).
 
+### GitHub intelligence & Developer Mode
+
+CommandLayer understands the GitHub page you are looking at — repository,
+file, directory, commit, pull request, issue, discussion, release, and search
+surfaces — and reasons about code without ever becoming a coding agent:
+
+- **Read-only by construction.** Nothing is fetched from the GitHub API and no
+  account is used: the context comes from the page you already have open,
+  captured by the same bounded engine as any other page. Detection is
+  URL-first (deterministic, testable) with page metadata corroborating
+  identity, never a single fragile selector.
+- **Bounded and honest.** A 60-entry file listing, a 120-line code slice, a
+  150-line diff excerpt, a 2 000-character README excerpt, and at most 4
+  navigation steps — every cap is reported through `truncated`, and the
+  evidence flags say whether identity came from the URL, the metadata, or the
+  DOM.
+- **Developer commands.** Explain a file, a repository, or a snippet; find
+  where something is defined; analyze a diff or a commit; review a pull
+  request; analyze an issue; compare code; find TODOs; find potential bugs;
+  turn an issue or pull request into a change plan. Deterministic analysis runs
+  first, so useful results do not depend on a model being available.
+- **Findings you can check.** Every finding carries severity, category, file,
+  line, explanation, **evidence**, and confidence — and the wording stays
+  hedged ("Potential issue", "Worth checking"). Model output that claims
+  certainty, or that cites a file which is not repository-relative, is
+  dropped.
+- **More than advice.** A change plan ends in a typed navigation proposal
+  (open these files) that goes through the Phase 4 planner and the Phase 5
+  approval flow: preview, **Allow & run**, step-by-step progress, verification.
+- **Developer Mode is presentation only.** An off-by-default toggle that adds
+  repository / file / code-context / PR-issue / analysis / change-plan /
+  saved-context sections to the Side Panel. Everything works without it, and
+  it never relaxes a validation or skips an approval.
+- **No mutations.** Issues, comments, reviews, approvals, merges, closes,
+  branch deletion, settings, and pushes are absent from the action vocabulary,
+  the validator, and the planner. See
+  [`docs/developer-intelligence.md`](docs/developer-intelligence.md) and
+  [`docs/github-integration.md`](docs/github-integration.md).
+
 ### Deliberately not included
 
 No autonomous browsing, no always-on background agent, no scheduled or
 recurring automation, no unbounded observe→reason→act loop, no passive or
 inferred memory (nothing is learned from your browsing), no memory export or
-import, no payments, no bulk or always-allow approvals, and no integrations.
+import, no payments, no bulk or always-allow approvals, no code editing, no
+commits or pushes, and no GitHub mutations. Signed-in GitHub API access
+(Mode B) is a typed boundary that stays disabled — no OAuth flow, no token
+storage, no API client — rather than an unsafe shortcut.
 Multi-page research and cross-tab comparison are not implemented — the Phase 1
 *Research* / *Compare* quick actions were removed from the UI rather than
 faked.
@@ -209,6 +253,23 @@ faked.
   they cannot approve actions or workflows, change risk, skip confirmation, or
   override a validator. Prompt content inside a memory is treated as data and
   cannot execute.
+- **GitHub content is untrusted data.** READMEs, source files, issue and pull
+  request bodies, commit messages, and comments are captured as bounded,
+  delimited data. Injections such as "ignore previous instructions", "reveal
+  secrets", or "execute this command" stay text: the developer prompt has no
+  field that could carry an instruction, and the planner never reads model
+  prose.
+- **GitHub actions are navigation, not mutation.** The only GitHub action is a
+  typed `NAVIGATE_GITHUB` step whose URL CommandLayer builds from validated
+  identity fields (owner, repository, ref, path, PR/issue number, search
+  query) — never from a raw URL string, a selector, or model output. It
+  requires approval, runs once, and is verified against the URL that was
+  approved.
+- **No GitHub credentials exist to leak.** No token field in any type, no
+  `chrome.identity`, no `localStorage`, no Vite environment secret, and a
+  validator that mechanically rejects credential-shaped values
+  (`ghp_…`, `github_pat_…`, bearer headers) anywhere they appear. A test walks
+  the entire `src/` tree to prove it.
 - **Safe errors and honest states.** The UI renders user-safe messages from a
   fixed vocabulary — never stack traces — and reports real states
   (`ready` / `partial` / `unsupported` / `unavailable` / *site access
@@ -221,7 +282,7 @@ faked.
 | `commands` | Registers the `Ctrl+Shift+L` / `⌘⇧L` keyboard shortcut |
 | `sidePanel` | Opens and hosts the Side Panel experience |
 | `storage` | Stores validated preferences (theme, motion, gateway URL, safety toggles) and the personal memories you explicitly confirmed |
-| `tabs` | Reads the *active* tab's title and URL only |
+| `tabs` | Reads the *active* tab's title and URL only, and opens the GitHub page you explicitly approved |
 
 `content_scripts` matches `http://*/*` and `https://*/*`, `run_at:
 document_idle`, `all_frames: false` — the extraction-only content script. No
@@ -316,7 +377,7 @@ duplicate-approval, and no-storage-write checks.
 npm test
 ```
 
-The suite runs **70 test files / 695 tests** and covers, among other things:
+The suite runs **79 test files / 764 tests** and covers, among other things:
 
 - **Manifest & config validation** — MV3 shape, identity, worker, popup, side
   panel, keyboard command, content-script registration (http/https only, no
@@ -354,6 +415,20 @@ The suite runs **70 test files / 695 tests** and covers, among other things:
   records, schema-version and storage-failure recovery, persistence across a
   worker restart, an injection-shaped memory staying inert, and the
   AI-cannot-persist and workflow-unaffected boundaries.
+- **Developer intelligence (Phase 7)** — GitHub surface detection for every
+  surface (including unknown and non-GitHub hosts), URL-first identity with
+  metadata corroboration, bounded capture with hostile markup, oversized DOM,
+  traversal paths and malformed payloads, developer command parsing that never
+  claims ordinary page commands, developer context caps and truncation, code
+  search bounds / timeout / zero-hit behaviour, diff classification and
+  sensitive files, findings evidence/severity/hedging/caps, change-plan
+  determinism (the model cannot add files or navigation), result validation
+  (closed schema, unsafe paths rejected), prompt-injection payloads in README,
+  source, issue, PR, and commit content staying data, memory that cannot
+  authorise a GitHub action, credential-leak scanning, `NAVIGATE_GITHUB`
+  rejection of raw URLs / other hosts / unknown fields, and the full
+  approval → execute → verify path including stale-page and forged-plan
+  refusals.
 - **UI** — Side Panel, Popup, Command Center rendering and interactions,
   settings application, page-insight states, workflow preview → approve →
   verified result.
@@ -379,7 +454,11 @@ The suite runs **70 test files / 695 tests** and covers, among other things:
 7. Say `remember my password is hunter2` — it is refused (“Nothing was
    stored.”). Open Settings → Memory, turn memory off, and repeat step 6: the
    command is refused and no memory is used.
-8. Open `edge://extensions` — the page is reported as unsupported and capture
+8. Open a GitHub pull request page, turn on Developer Mode (Settings →
+   Developer Mode), and run `review this pull request` — the developer result
+   shows findings with evidence, and the change plan offers *Allow & run* for
+   the typed file navigation only after approval.
+9. Open `edge://extensions` — the page is reported as unsupported and capture
    is unavailable.
 
 > An automated browser smoke test is deliberately **not** part of the
@@ -399,17 +478,19 @@ The suite runs **70 test files / 695 tests** and covers, among other things:
 | 4 | Safe Action Engine — typed bounded actions with Preview → Permission → Execute → Verify | Delivered |
 | 5 | Contextual Workflow Engine — bounded multi-step tasks, hash-bound approvals, per-step verification | Delivered |
 | 6 | Persistent Personal Memory — user-approved memories with confirmation, sensitive-data refusal, bounded retrieval, deletion, and a privacy switch | Delivered |
-| 7+ | Not started | — |
+| 7 | Developer Intelligence & GitHub Workflows — typed GitHub page context, bounded code search, evidence-based findings, change planning, typed GitHub navigation through the Phase 4/5 engines, Developer Mode | Delivered |
+| 8+ | Not started | — |
 
-Current release: **CommandLayer 0.5.0**, `manifest_version: 3`, `Phase 6
-Personal Memory`.
+Current release: **CommandLayer 0.6.0**, `manifest_version: 3`, `Phase 7
+Developer Intelligence`.
 
 ---
 
 ## Current limitations
 
-- **Actions and workflows are bounded and explicit.** Six typed actions, at
-  most 4 workflow steps of one action each, and always an approval. There is no
+- **Actions and workflows are bounded and explicit.** Seven typed actions
+  (including GitHub navigation), at most 4 workflow steps of one action each,
+  and always an approval. There is no
   bulk/always-allow mode, no branching, no looping, no cross-tab or multi-page
   work, and no background automation.
 - **Deterministic, pattern-based understanding.** Explicit phrasings such as
@@ -434,6 +515,15 @@ Personal Memory`.
   deterministic readable-content heuristic with fixed caps. Unusual page
   structures may produce imperfect (always bounded) results, flagged
   `partial`; iframes are not captured (`all_frames: false`).
+- **Developer intelligence reads what the page rendered.** Repository
+  understanding is one directory level deep, the diff excerpt is what GitHub
+  displayed (not the full patch), and a virtualised or collapsed file yields
+  less — always flagged `truncated` rather than guessed. GitHub Enterprise
+  hosts are not treated as GitHub.
+- **Findings are heuristics, not an audit.** They are phrased as things worth
+  checking and always cite evidence; they are not a security review, and the
+  local (mock) provider's findings come from deterministic rules over the
+  captured slice.
 - **Retrieval is narrow.** Memory never overrides your current instruction, and
   conflicts resolve to the most recently updated memory (the older one is
   dropped for that request) rather than being merged.
@@ -452,7 +542,9 @@ explicit permission, bounded execution, verification:
 
 - multi-page research and cross-tab comparison;
 - a wider typed action vocabulary;
-- integrations through the integration registry;
+- optional signed-in GitHub access behind a dedicated credential
+  architecture (see `docs/github-integration.md` for what that would require);
+- repository-level context that does not depend on what one page rendered;
 - memory export/import once it can be proven not to leak secrets, and richer
   memory conflict handling.
 
@@ -467,6 +559,15 @@ explicit permission, bounded execution, verification:
   Workflow Engine: understanding, planning, validation, state machine,
   approval binding, observation and verification, replanning, concurrency,
   privacy, extension points.
+- [`docs/developer-intelligence.md`](docs/developer-intelligence.md) — the
+  developer work layer: the 12 intents, the architecture chain, deterministic
+  analysis, the finding model, bounded code search, change planning, the
+  memory boundary, Developer Mode, security, performance, and honest limits.
+- [`docs/github-integration.md`](docs/github-integration.md) — the GitHub
+  integration: Mode A page-context capture (URL-first detection, corroborating
+  metadata, capture caps, evidence flags, what is never read) and Mode B
+  authenticated API as a disabled, documented boundary, plus permissions and
+  limits.
 - [`docs/memory.md`](docs/memory.md) — Persistent Personal Memory: the memory
   model, categories, consent flow, sensitive-data policy, storage and schema,
   bounded retrieval, privacy controls and deletion, the AI and workflow

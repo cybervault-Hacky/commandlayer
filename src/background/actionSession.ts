@@ -7,6 +7,7 @@
  * and typed results — and must send an explicit ACTION_EXECUTE to run
  * anything.
  */
+import { buildGitHubUrl, type GitHubNavTarget } from '@/github/patterns';
 import { getPageContext } from './pageContext';
 import { pageContentDigest } from '@/page-intelligence/hash';
 import { executePlan, type ExecutorEnvironment } from '@/actions/executor';
@@ -14,7 +15,7 @@ import { permissionLedger } from '@/actions/permissions';
 import { actionSessionStore } from '@/actions/session';
 import { ActionEvent } from '@/actions/machine';
 import { ACTION_LIMITS } from '@/actions/limits';
-import { ActionErrorCode, type ReadPageData } from '@/actions/types';
+import { ActionErrorCode, ActionKind, type ReadPageData } from '@/actions/types';
 import type { CommandResult, CommandSource } from '@/shared/types/command';
 
 /** Build the privileged executor environment (injectable for tests). */
@@ -39,12 +40,41 @@ export function createExecutorEnvironment(): ExecutorEnvironment {
       }
       return chrome.tabs.sendMessage(tabId, message);
     },
-    async captureContentHash() {
+    async captureContentHash(plan) {
+      // The developer capture profile (metadata + headings + text + links +
+      // the typed GitHub context) is the one a GitHub navigation plan was
+      // bound against, so freshness is checked against exactly that.
+      const needsGitHub = plan.actions.some(
+        (step) => step.action.type === ActionKind.NavigateGitHub,
+      );
       const fresh = await getPageContext({
-        sections: ['metadata', 'headings', 'text'],
+        sections: needsGitHub
+          ? ['metadata', 'headings', 'text', 'links', 'github']
+          : ['metadata', 'headings', 'text'],
       });
       if (fresh.state !== 'ready' && fresh.state !== 'partial') return '';
       return pageContentDigest(fresh);
+    },
+    /**
+     * Phase 7 — GitHub navigation. The URL is rebuilt here from the typed
+     * target (never taken from a carried string), and only github.com is ever
+     * loaded. Navigation is bounded: we wait briefly for the tab to settle and
+     * report the URL that is actually loaded.
+     */
+    async navigateTo(
+      tabId: number,
+      target: GitHubNavTarget,
+    ): Promise<{ url: string } | null> {
+      if (typeof chrome === 'undefined' || !chrome.tabs?.update) return null;
+      const url = buildGitHubUrl(target);
+      if (url === null) return null;
+      try {
+        await chrome.tabs.update(tabId, { url });
+      } catch {
+        return null;
+      }
+      await waitForTabSettled(tabId);
+      return { url };
     },
     async readPage(): Promise<ReadPageData | null> {
       const context = await getPageContext();
@@ -63,6 +93,21 @@ export function createExecutorEnvironment(): ExecutorEnvironment {
       };
     },
   };
+}
+
+/** Bounded wait (≤2.5s) for a navigated tab to finish loading. */
+async function waitForTabSettled(tabId: number): Promise<void> {
+  if (typeof chrome === 'undefined' || !chrome.tabs?.get) return;
+  const deadline = Date.now() + 2500;
+  while (Date.now() < deadline) {
+    try {
+      const tab = await chrome.tabs.get(tabId);
+      if (tab?.status === 'complete') return;
+    } catch {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
 }
 
 /**

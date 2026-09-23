@@ -34,6 +34,7 @@ import {
 } from '@/page-intelligence/profiles';
 import { resolveIntent, intentForQuickAction } from '@/ai/intents';
 import { looksLikeActionRequest } from '@/actions/planner';
+import { parseDeveloperRequest } from '@/developer/parser';
 import { PageSection } from '@/shared/types/page';
 import type {
   CommandSource,
@@ -368,12 +369,18 @@ async function dispatchMessage(message: MessageEnvelope): Promise<unknown> {
       // executor re-captures for freshness checks); reasoning commands
       // use the sections their intent needs. Forms are never captured
       // for the AI pipeline.
-      const isActionRequest = looksLikeActionRequest(payload.text);
+      // Phase 7: developer phrasing takes the developer capture profile
+      // (structure + text + the typed GitHub context) and is NOT treated as
+      // an in-page action request, so a code search on GitHub is a code
+      // search and never a page-level FIND_TEXT.
+      const developerRequest = parseDeveloperRequest(payload.text);
+      const isActionRequest =
+        developerRequest === null && looksLikeActionRequest(payload.text);
       const intent =
         payload.quickAction !== undefined
           ? intentForQuickAction(payload.quickAction) ??
             resolveIntent(payload.text)
-          : resolveIntent(payload.text);
+          : developerRequest?.intent ?? resolveIntent(payload.text);
       const sections = isActionRequest
         ? ([PageSection.Metadata, PageSection.Headings, PageSection.Text] as const)
         : sectionsForIntent(intent);

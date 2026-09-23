@@ -104,6 +104,9 @@ export function workflowIntentForAction(action: {
       return WorkflowIntent.Find;
     case 'CLICK_ELEMENT':
       return WorkflowIntent.Open;
+    case 'NAVIGATE_GITHUB':
+      // Deterministic navigation — the same intent class as an in-page open.
+      return WorkflowIntent.Open;
     case 'TYPE_TEXT':
       return WorkflowIntent.Type;
     case 'SELECT_OPTION':

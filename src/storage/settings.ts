@@ -14,6 +14,7 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
   reduceMotion: false,
   onboardingSeen: false,
   memoryEnabled: true,
+  developerMode: false,
 });
 
 /** Read settings, recovering gracefully from missing or corrupted data. */

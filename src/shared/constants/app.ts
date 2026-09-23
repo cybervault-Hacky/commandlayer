@@ -3,8 +3,8 @@
  * public/manifest.json — tests enforce this.
  */
 export const APP_NAME = 'CommandLayer';
-export const APP_VERSION = '0.5.0';
-export const PHASE_LABEL = 'Phase 6 Personal Memory';
+export const APP_VERSION = '0.6.0';
+export const PHASE_LABEL = 'Phase 7 Developer Intelligence';
 export const TAGLINE = 'Think once. Execute everywhere.';
 
 /** Maximum length of a stored page title (display truncation). */

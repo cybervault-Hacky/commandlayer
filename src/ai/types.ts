@@ -10,11 +10,17 @@
  * the user's request, and the webpage data block (see prompts.ts).
  */
 import type { PageContext } from '@/shared/types/page';
+import { DeveloperIntent as DeveloperIntentValues } from '@/developer/intents';
 
 /**
  * Reasoning-only intents. There is deliberately no action intent
  * (no CLICK / TYPE / SUBMIT / NAVIGATE / DELETE / SEND / PURCHASE):
  * CommandLayer does not grant AI permission to perform browser actions.
+ *
+ * Phase 7 composes the developer vocabulary (EXPLAIN_CODE, REVIEW_PULL_REQUEST,
+ * GENERATE_CHANGE_PLAN, …) into this SAME union — one taxonomy, no parallel
+ * intent system. Developer intents are reasoning-only too: they can explain,
+ * search, review, and plan, but never edit, commit, push, or merge.
  */
 export const AIIntent = {
   Summarize: 'SUMMARIZE',
@@ -22,6 +28,7 @@ export const AIIntent = {
   Explain: 'EXPLAIN',
   Extract: 'EXTRACT',
   Answer: 'ANSWER',
+  ...DeveloperIntentValues,
 } as const;
 
 export type AIIntent = (typeof AIIntent)[keyof typeof AIIntent];
@@ -60,6 +67,134 @@ export interface AIContext {
   truncated: boolean;
 }
 
+/* ------------------------------------------------------------------ *
+ * Phase 7 — developer intelligence contracts
+ * ------------------------------------------------------------------ */
+
+/** Severity of one review finding (closed set, never model-invented). */
+export const FindingSeverity = {
+  Info: 'info',
+  Low: 'low',
+  Medium: 'medium',
+  High: 'high',
+} as const;
+
+export type FindingSeverity =
+  (typeof FindingSeverity)[keyof typeof FindingSeverity];
+
+/** Review categories (closed set). */
+export const FindingCategory = {
+  Correctness: 'correctness',
+  Maintainability: 'maintainability',
+  Security: 'security',
+  Performance: 'performance',
+  Testing: 'testing',
+  Compatibility: 'compatibility',
+  Configuration: 'configuration',
+} as const;
+
+export type FindingCategory =
+  (typeof FindingCategory)[keyof typeof FindingCategory];
+
+/** How sure the analysis is allowed to be. Never "certain". */
+export const FindingConfidence = {
+  Low: 'low',
+  Medium: 'medium',
+  High: 'high',
+} as const;
+
+export type FindingConfidence =
+  (typeof FindingConfidence)[keyof typeof FindingConfidence];
+
+/**
+ * One structured review finding. `evidence` is REQUIRED: a finding without
+ * evidence is dropped by the validator, which is what keeps "potential issue"
+ * wording honest instead of assertive.
+ */
+export interface AIFinding {
+  severity: FindingSeverity;
+  category: FindingCategory;
+  /** Repository-relative path the finding refers to, when known. */
+  file: string | null;
+  /** 1-based line or range start, when the page stated one. */
+  line: number | null;
+  /** What was observed and why it may matter (uncertain wording). */
+  explanation: string;
+  /** The concrete evidence from the supplied context. */
+  evidence: string;
+  confidence: FindingConfidence;
+}
+
+/** One step of a proposed change plan (a PLAN — never an execution). */
+export interface AIChangePlanStep {
+  title: string;
+  detail?: string;
+  files?: string[];
+}
+
+/**
+ * A bounded change plan: what a developer would likely do, in order. It is
+ * advisory text; any executable part still has to travel through the Phase 4
+ * planner and the Phase 5 approval flow.
+ */
+export interface AIChangePlan {
+  summary: string;
+  steps: AIChangePlanStep[];
+}
+
+/**
+ * The bounded developer context attached to a developer request. Built ONLY
+ * by src/developer/context.ts from a validated PageContext: every field is
+ * capped, every string is sanitized, and nothing outside the captured page is
+ * ever requested (no repository downloads, no API calls, no tokens).
+ */
+export interface AIDeveloperContext {
+  /** GitHubSurface value ('file', 'pull_request', …). */
+  surface: string;
+  /** 'owner/repository', when known. */
+  repository: string | null;
+  ref: string | null;
+  path: string | null;
+  language: string | null;
+  /** The developer intent driving this context (label only). */
+  intent: string;
+  /** Bounded repository file listing. */
+  files: string[];
+  changedFiles: Array<{
+    path: string;
+    status: string;
+    additions: number | null;
+    deletions: number | null;
+  }>;
+  additions: number | null;
+  deletions: number | null;
+  /** Bounded rendered code slice (single file). */
+  code: {
+    path: string;
+    language: string | null;
+    lines: Array<{ number: number; text: string }>;
+  } | null;
+  /** Bounded rendered unified diff. */
+  diff: Array<{ kind: '+' | '-' | ' '; text: string }> | null;
+  /**
+   * Bounded results of the deterministic local search over the captured
+   * context (path, line, snippet). Never a repository download.
+   */
+  search: {
+    query: string;
+    hits: Array<{ path: string | null; line: number | null; snippet: string }>;
+  } | null;
+  /** Local, deterministic observations (counts and labels — never AI text). */
+  observations: string[];
+  /**
+   * Honest notes about what could NOT be read (bounded render, missing diff,
+   * truncated sections). The model is expected to say so instead of filling
+   * the gap with invention.
+   */
+  notes: string[];
+  truncated: boolean;
+}
+
 /**
  * Phase 6 — one saved memory as the AI sees it. Deliberately tiny: a
  * category and the user's own words. Memory is DATA (never instructions),
@@ -83,6 +218,12 @@ export interface AIRequest {
    * or empty when memory is off or nothing was relevant.
    */
   memory?: readonly AISavedMemory[];
+  /**
+   * Phase 7 — bounded developer context. Present only for developer
+   * intents, and only when a developer context could be built from the
+   * captured page.
+   */
+  developer?: AIDeveloperContext;
   createdAt: string;
 }
 
@@ -105,6 +246,10 @@ export interface AIResponseCandidate {
   answer?: string;
   sections?: AISection[];
   sources?: AISource[];
+  /** Phase 7 — untrusted, optional structured findings (validated). */
+  findings?: unknown;
+  /** Phase 7 — untrusted, optional change plan (validated). */
+  changePlan?: unknown;
   error?: { code?: string; message?: string };
 }
 
@@ -116,6 +261,10 @@ export interface AIResponse {
   answer: string;
   sections: AISection[];
   sources: AISource[];
+  /** Phase 7 — validated findings (empty for non-developer intents). */
+  findings: AIFinding[];
+  /** Phase 7 — validated change plan, or null. */
+  changePlan: AIChangePlan | null;
   /** Provider id that produced the response (e.g. 'local-mock'). */
   provider: string;
   finishedAt: string;

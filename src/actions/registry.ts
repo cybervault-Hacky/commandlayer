@@ -8,6 +8,7 @@
  * Risk is owned by the registry — never by AI output, never by the
  * request, and never configurable at runtime.
  */
+import { describeNavTarget } from '@/github/patterns';
 import { describeTarget } from './targets';
 import {
   ActionKind,
@@ -64,6 +65,18 @@ const DEFINITIONS: Record<ActionKind, ActionDefinition> = {
           return `Scroll down ${a.distancePx ?? 600}px`;
       }
     },
+  },
+  [ActionKind.NavigateGitHub]: {
+    type: ActionKind.NavigateGitHub,
+    // Navigation leaves the current page and loads a new one: always an
+    // explicit, single-use approval, and never retried automatically.
+    retryPolicy: ActionRetryPolicy.Never,
+    risk: ActionRisk.Confirmation,
+    verb: 'Open',
+    preview: (a) =>
+      a.type === ActionKind.NavigateGitHub
+        ? `Open ${describeNavTarget(a.target)} in this tab`
+        : '',
   },
   [ActionKind.ClickElement]: {
     type: ActionKind.ClickElement,

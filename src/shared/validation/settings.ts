@@ -29,6 +29,8 @@ export function parseStoredSettings(raw: unknown): Settings | null {
     // (writes still require an explicit confirmation every time).
     memoryEnabled:
       typeof record.memoryEnabled === 'boolean' ? record.memoryEnabled : true,
+    developerMode:
+      typeof record.developerMode === 'boolean' ? record.developerMode : false,
   };
 }
 
@@ -62,6 +64,13 @@ export function validateSettingsPatch(patch: unknown): SettingsPatchValidation {
     }
     out.onboardingSeen = record.onboardingSeen;
   }
+  if ('developerMode' in record) {
+    if (typeof record.developerMode !== 'boolean') {
+      return { ok: false, error: 'developerMode must be a boolean' };
+    }
+    out.developerMode = record.developerMode;
+  }
+
   if ('memoryEnabled' in record) {
     if (typeof record.memoryEnabled !== 'boolean') {
       return { ok: false, error: 'memoryEnabled must be a boolean' };

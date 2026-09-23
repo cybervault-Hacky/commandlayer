@@ -15,14 +15,16 @@ describe('settings storage', () => {
 
   it('returns defaults when nothing is stored', async () => {
     const settings = await getSettings();
-    // Phase 6 added `memoryEnabled` (default on): the stored schema is
-    // unchanged, so pre-Phase-6 blobs still load with memory on.
+    // Phase 6 added `memoryEnabled` (default on) and Phase 7 added
+    // `developerMode` (default off): the stored schema is unchanged, so older
+    // blobs still load, with the safe default for each new switch.
     expect(settings).toEqual({
       schema: 1,
       theme: 'dark',
       reduceMotion: false,
       onboardingSeen: false,
       memoryEnabled: true,
+      developerMode: false,
     });
   });
 

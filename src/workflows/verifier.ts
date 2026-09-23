@@ -120,6 +120,11 @@ export function verifyStepResult(
     case 'SCROLL':
       return { ok: true, blocked: false, detail: 'The page was scrolled.' };
 
+    case 'NAVIGATE_GITHUB':
+      // The executor only reports a destination it actually opened (the URL
+      // is built from a validated typed target on the background side).
+      return { ok: true, blocked: false, detail: result.message };
+
     case 'CLICK_ELEMENT':
       return {
         ok: result.verification?.ok !== false,

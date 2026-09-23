@@ -2,6 +2,7 @@ import type { ReactElement } from 'react';
 import type { ActionKind } from '@/actions/types';
 import {
   IconClickAction,
+  IconExternalLink,
   IconFindText,
   IconReadPage,
   IconScrollAction,
@@ -21,6 +22,7 @@ export const ICON_FOR_ACTION: Record<
   (props: IconProps) => ReactElement
 > = {
   READ_PAGE: IconReadPage,
+  NAVIGATE_GITHUB: IconExternalLink,
   SCROLL: IconScrollAction,
   FIND_TEXT: IconFindText,
   CLICK_ELEMENT: IconClickAction,

@@ -109,6 +109,8 @@ describe('Session transcript — Phase 4 entries', () => {
               answer: 'An answer.',
               sections: [],
               sources: [],
+              findings: [],
+              changePlan: null,
               provider: 'local-mock',
               finishedAt: new Date().toISOString(),
             },

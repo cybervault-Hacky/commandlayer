@@ -33,8 +33,17 @@ import {
   type AIIntent,
   type AIResponse,
 } from '@/ai/types';
-import { planAction, looksLikeActionRequest } from '@/actions/planner';
+import { planAction, looksLikeActionRequest, finalizePlan } from '@/actions/planner';
 import { actionSessionStore } from '@/actions/session';
+import { parseDeveloperRequest } from '@/developer/parser';
+import { buildDeveloperContext } from '@/developer/context';
+import { analyzeDeveloperContext } from '@/developer/analysis';
+import { buildDeveloperResult } from '@/developer';
+import { toNavigationTargets } from '@/developer/plan';
+import type {
+  DeveloperRequest,
+  DeveloperResultView,
+} from '@/developer/types';
 import { planWorkflow } from '@/workflows/planner';
 import {
   analyzeGoalText,
@@ -45,7 +54,13 @@ import type { TaskUnderstanding } from '@/workflows/understanding';
 import type { WorkflowView } from '@/workflows/types';
 import { actionRegistry } from '@/actions/registry';
 import { pageContentDigest } from '@/page-intelligence/hash';
-import type { ActionPlan } from '@/actions/types';
+import { ACTION_LIMITS } from '@/actions/limits';
+import {
+  ActionKind,
+  type Action,
+  type ActionPlan,
+} from '@/actions/types';
+import type { PageContext } from '@/shared/types/page';
 import {
   isCommandSource,
   type CommandRequest,
@@ -75,6 +90,19 @@ export type HandlerResult =
   | { kind: 'memoryResult'; result: MemoryResultView }
   | { kind: 'memoryFailure'; code: string; message: string }
   | { kind: 'plan'; plan: ActionPlan }
+  | {
+      kind: 'developer';
+      /** Phase 7 — typed developer result (deterministic + model-assisted). */
+      result: DeveloperResultView;
+      /**
+       * Phase 7 — the bounded GitHub navigation plan (already stored in the
+       * Phase 4 session store, awaiting the user's explicit approval). The
+       * developer result itself carries no executable data.
+       */
+      plan?: ActionPlan;
+      ai?: AIResponse;
+      memoriesUsed?: MemoryUsedView[];
+    }
   | {
       kind: 'workflow';
       workflow: WorkflowView;
@@ -112,6 +140,23 @@ export class AICommandHandler implements CommandHandler {
     // a confirmation preview (or a bounded listing).
     const memory = await this.handleMemory(text);
     if (memory !== null) return memory;
+
+    // Phase 7: developer intelligence. It only engages when the captured
+    // page actually exposed a VALIDATED GitHub context — on any other page
+    // the phrasing falls through to the Phase 1–6 routing unchanged, so
+    // nothing about existing behaviour depends on GitHub being present.
+    const developerRequest = request.context?.github
+      ? parseDeveloperRequest(text)
+      : null;
+    if (developerRequest) {
+      const developerResult = await this.developDeveloper(
+        request,
+        text,
+        developerRequest,
+        signal,
+      );
+      if (developerResult !== null) return developerResult;
+    }
 
     // Phase 5: a multi-clause goal is planned as a bounded WORKFLOW
     // before any single-action planning, so a multi-step request is never
@@ -226,6 +271,134 @@ export class AICommandHandler implements CommandHandler {
       workflow: toWorkflowView(record),
       understanding: planned.understanding,
     };
+  }
+
+  /**
+   * Phase 7 — the developer path.
+   *
+   * Deterministic first: the bounded developer context and its analysis are
+   * built from the validated page capture alone, and they stand on their own.
+   * The model then adds narrative and extra (validated, evidence-bearing,
+   * never-certain) findings on top. If the model is unavailable, the
+   * deterministic result is still returned — labelled as such.
+   *
+   * GitHub navigation is derived from the deterministic analysis only (never
+   * from model output), converted to typed targets, validated by the Phase 4
+   * validator, and stored for explicit user approval. Nothing navigates here.
+   */
+  private async developDeveloper(
+    request: CommandRequest,
+    text: string,
+    parsed: DeveloperRequest,
+    signal: AbortSignal,
+  ): Promise<HandlerResult | null> {
+    const context = request.context;
+    if (context === null) return null;
+
+    const built = buildDeveloperContext({ page: context, request: parsed });
+    if (!built.available || !built.github) return null;
+
+    const analysis = analyzeDeveloperContext({
+      github: built.github,
+      request: parsed,
+      bundle: built.bundle,
+    });
+
+    // Phase 6 retrieval is unchanged and bounded — and it can never grant
+    // anything here: memory only ever adds a saved-context block.
+    const retrieval = await memoryController.retrieve(text);
+
+    let ai: AIResponse | null = null;
+    const aiContext = built.ai;
+    if (aiContext !== null) {
+      const reasoningContext = buildAIContext(context, parsed.intent);
+      if (reasoningContext !== null) {
+        const result = await runAIRequest({
+          requestId: request.id,
+          intent: parsed.intent,
+          userPrompt: text,
+          context: reasoningContext,
+          developer: aiContext,
+          signal,
+          ...(retrieval.memories.length > 0
+            ? { memory: toAISavedMemories(retrieval) }
+            : {}),
+        });
+        if (result.ok) ai = result.response;
+      }
+    }
+
+    // A superseded request must never render output.
+    if (signal.aborted) {
+      return {
+        kind: 'error',
+        error: aiError(AIErrorCode.AI_CANCELLED),
+        intent: parsed.intent,
+      };
+    }
+
+    const composed = buildDeveloperResult({
+      pageContext: context,
+      request: parsed,
+      ai,
+      context: built,
+      analysis,
+    });
+    if (composed.result === null) return null;
+
+    const plan = this.planDeveloperNavigation(composed.result, request, context);
+
+    return {
+      kind: 'developer',
+      result: composed.result,
+      ...(plan ? { plan } : {}),
+      ...(ai ? { ai } : {}),
+      ...(retrieval.memories.length > 0
+        ? { memoriesUsed: retrieval.memories }
+        : {}),
+    };
+  }
+
+  /**
+   * Phase 7 — turn the analysed navigation proposals into a Phase 4 plan.
+   *
+   * The owner, repository and ref come from the validated page context; the
+   * paths come from the deterministic analysis; every step is re-validated by
+   * the shared action validator. The plan is stored awaiting approval and is
+   * never executed here.
+   */
+  private planDeveloperNavigation(
+    result: DeveloperResultView,
+    request: CommandRequest,
+    context: PageContext,
+  ): ActionPlan | null {
+    const plan = result.plan;
+    if (!plan || !plan.executable || plan.navigation.length === 0) return null;
+    if (request.tabId === undefined) return null;
+    const github = context.github;
+    if (!github) return null;
+
+    const targets = toNavigationTargets(plan.navigation, github).slice(
+      0,
+      ACTION_LIMITS.MAX_ACTIONS_PER_PLAN,
+    );
+    if (targets.length === 0) return null;
+
+    const actions: Action[] = targets.map((target) => ({
+      type: ActionKind.NavigateGitHub,
+      target,
+    }));
+
+    const outcome = finalizePlan(actions, {
+      requestId: request.id,
+      tabId: request.tabId,
+      url: context.url ?? '',
+      contentHash: pageContentDigest(context),
+    });
+    if (!outcome.plan) return null;
+
+    actionSessionStore.addPlan(outcome.plan);
+    return outcome.plan;
   }
 
   /**
@@ -524,6 +697,28 @@ export class CommandDispatcher {
               : {}),
           },
           errorCode: output.errorCode,
+          retryable: false,
+          startedAt,
+          finishedAt,
+        };
+      }
+
+      if (output.kind === 'developer') {
+        // A developer result is a REPORT: it never executes anything. Any
+        // navigation it proposes travels in `plan`, which still needs the
+        // user's explicit approval (ACTION_EXECUTE bound to the plan hash).
+        return {
+          id: request.id,
+          status: 'completed',
+          text: output.result.summary,
+          ...base,
+          intent: output.result.intent,
+          developer: output.result,
+          ...(output.ai ? { ai: output.ai } : {}),
+          ...(output.plan ? { plan: output.plan } : {}),
+          ...(output.memoriesUsed && output.memoriesUsed.length > 0
+            ? { memoriesUsed: output.memoriesUsed }
+            : {}),
           retryable: false,
           startedAt,
           finishedAt,

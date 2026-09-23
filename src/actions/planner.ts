@@ -78,8 +78,20 @@ export function planAction(
 
   if (actions === null) return {};
 
-  // Central validation gate: even planner output must pass the strict
-  // allowlist/limits validator (defense in depth — no privileged path).
+  return finalizePlan(actions, context, now);
+}
+
+/**
+ * Validation gate + plan construction shared by every planner (Phase 4
+ * phrasing rules and the Phase 7 developer change planner). Even trusted
+ * planner output must pass the strict allowlist/limits validator here —
+ * there is no privileged path into the action session store.
+ */
+export function finalizePlan(
+  actions: Action[],
+  context: PlanContext,
+  now: Date = new Date(),
+): PlanOutcome {
   const validated = parseActionListCandidate(actions);
   if (validated === null) {
     return { reason: 'The requested action exceeds CommandLayer safety limits.' };

@@ -32,6 +32,8 @@ const VALID_SECTIONS: ReadonlySet<string> = new Set([
   'tables',
   'forms',
   'selection',
+  // Phase 7 — GitHub structure (developer intents only).
+  'github',
 ]);
 
 export function buildExtractPageRequest(

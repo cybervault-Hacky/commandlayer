@@ -16,6 +16,7 @@ const env: ExecutorEnvironment = {
   sendStep: async () => ({ ok: true, result: { status: 'success', message: 'ok' } }),
   captureContentHash: async () => '',
   readPage: async () => null,
+  navigateTo: async () => null,
 };
 
 function seedPlan(text: string) {

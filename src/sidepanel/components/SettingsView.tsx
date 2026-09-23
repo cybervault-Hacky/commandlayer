@@ -108,6 +108,24 @@ export function SettingsView({
               : 'Running on the built-in local mock provider — fully functional, no setup, no secrets.'}
           </p>
           <div className="mt-4 border-t border-border pt-4">
+            <Toggle
+              id="developer-mode"
+              label="Developer Mode"
+              description="Show repository context and code analysis on GitHub pages."
+              checked={settings.developerMode}
+              onChange={(value) => {
+                void update({ developerMode: value });
+              }}
+            />
+            <p className="mt-2 text-[11px] leading-4 text-text-muted">
+              A presentation mode: it adds the developer sections to the Side
+              Panel on GitHub pages, and it changes nothing about what is
+              captured, what is allowed, or what needs your approval. The
+              repository is never downloaded.
+            </p>
+          </div>
+
+          <div className="mt-4 border-t border-border pt-4">
             <div className="flex items-start gap-2.5">
               <IconShield size={15} className="mt-0.5 shrink-0 text-text-muted" />
               <p className="text-[11.5px] leading-4.5 text-text-secondary">

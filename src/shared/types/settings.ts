@@ -18,6 +18,12 @@ export interface Settings {
    * the user deletes them, so they remain inspectable and deletable).
    */
   memoryEnabled: boolean;
+  /**
+   * Phase 7 — Developer Mode. Presentation only: it adds the developer
+   * sections to the Side Panel on GitHub pages and changes nothing about
+   * what is captured, what may run, or what needs approval.
+   */
+  developerMode: boolean;
 }
 
 /** Partial, validated settings update. */
@@ -26,4 +32,5 @@ export interface SettingsPatch {
   reduceMotion?: boolean;
   onboardingSeen?: boolean;
   memoryEnabled?: boolean;
+  developerMode?: boolean;
 }

@@ -380,6 +380,89 @@ export function IconLock(props: IconProps) {
   );
 }
 
+/* --- Phase 7 — developer intelligence --- */
+
+export function IconRepo(props: IconProps) {
+  const { size = 16, ...rest } = props;
+  return (
+    <svg {...svgProps(size, rest)}>
+      <path d="M6.5 4h11a1.5 1.5 0 0 1 1.5 1.5v13a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 5 18.5v-13A1.5 1.5 0 0 1 6.5 4Z" />
+      <path d="M9 4v16" />
+      <path d="M12 9h4" />
+      <path d="M12 12.5h4" />
+    </svg>
+  );
+}
+
+export function IconBranch(props: IconProps) {
+  const { size = 16, ...rest } = props;
+  return (
+    <svg {...svgProps(size, rest)}>
+      <circle cx="7.5" cy="6" r="2.2" />
+      <circle cx="7.5" cy="18" r="2.2" />
+      <circle cx="16.5" cy="9" r="2.2" />
+      <path d="M7.5 8.2v7.6" />
+      <path d="M16.5 11.2c0 2.6-2.4 3.4-4.6 3.9" />
+    </svg>
+  );
+}
+
+export function IconCode(props: IconProps) {
+  const { size = 16, ...rest } = props;
+  return (
+    <svg {...svgProps(size, rest)}>
+      <path d="m9 8.5-3.5 3.5L9 15.5" />
+      <path d="m15 8.5 3.5 3.5L15 15.5" />
+    </svg>
+  );
+}
+
+export function IconPullRequest(props: IconProps) {
+  const { size = 16, ...rest } = props;
+  return (
+    <svg {...svgProps(size, rest)}>
+      <circle cx="7" cy="6" r="2.2" />
+      <circle cx="7" cy="18" r="2.2" />
+      <circle cx="17" cy="18" r="2.2" />
+      <path d="M7 8.2v7.6" />
+      <path d="M9.4 6h4.1a3.5 3.5 0 0 1 3.5 3.5v6.1" />
+    </svg>
+  );
+}
+
+export function IconIssue(props: IconProps) {
+  const { size = 16, ...rest } = props;
+  return (
+    <svg {...svgProps(size, rest)}>
+      <circle cx="12" cy="12" r="7.5" />
+      <path d="M12 8.4v.2" />
+      <path d="M12 11.4v4.4" />
+    </svg>
+  );
+}
+
+export function IconExternalLink(props: IconProps) {
+  const { size = 16, ...rest } = props;
+  return (
+    <svg {...svgProps(size, rest)}>
+      <path d="M13.5 5h5.5v5.5" />
+      <path d="M19 5l-7.5 7.5" />
+      <path d="M17 14.5V18a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 18V8.5A1.5 1.5 0 0 1 6 7h3.5" />
+    </svg>
+  );
+}
+
+export function IconTerminalCheck(props: IconProps) {
+  const { size = 16, ...rest } = props;
+  return (
+    <svg {...svgProps(size, rest)}>
+      <rect x="3.5" y="5" width="17" height="14" rx="2" />
+      <path d="m7 10 2.2 2L7 14" />
+      <path d="m12 15h5" />
+    </svg>
+  );
+}
+
 /* --- Brand --- */
 
 export function BrandMark({

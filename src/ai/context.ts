@@ -10,8 +10,23 @@
  */
 import { sanitizeText } from '@/shared/security/sanitize';
 import type { PageContext } from '@/shared/types/page';
+import { DEVELOPER_INTENTS } from '@/developer/intents';
 import { AI_LIMITS } from './limits';
 import { AIIntent, type AIContext } from './types';
+
+/**
+ * Phase 7 — developer intents read the page broadly (headings, text, links)
+ * because repository structure lives in all three; the code body and diff
+ * excerpt travel in the developer context block instead, so they are not
+ * duplicated into the generic context.
+ */
+const DEVELOPER_CONTEXT_SECTIONS = {
+  headings: true,
+  text: true,
+  links: true,
+  tables: false,
+  selectedText: false,
+} as const;
 
 /**
  * Which PageContext sections each reasoning intent needs.
@@ -62,6 +77,9 @@ export const INTENT_CONTEXT_SECTIONS: Record<
     tables: false,
     selectedText: true,
   },
+  ...(Object.fromEntries(
+    DEVELOPER_INTENTS.map((intent) => [intent, DEVELOPER_CONTEXT_SECTIONS]),
+  ) as Record<(typeof DEVELOPER_INTENTS)[number], typeof DEVELOPER_CONTEXT_SECTIONS>),
 };
 
 /**

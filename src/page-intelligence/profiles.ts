@@ -9,6 +9,7 @@ import {
   type PageSection as Section,
 } from '@/shared/types/page';
 import { AIIntent } from '@/ai/types';
+import { DEVELOPER_INTENTS, type DeveloperIntent } from '@/developer/intents';
 
 export const PROFILE_SECTIONS: Record<
   PageContextProfile,
@@ -22,6 +23,7 @@ export const PROFILE_SECTIONS: Record<
     PageSection.Tables,
     PageSection.Forms,
     PageSection.Selection,
+    PageSection.GitHub,
   ],
   [PageContextProfile.Content]: [
     PageSection.Metadata,
@@ -29,6 +31,7 @@ export const PROFILE_SECTIONS: Record<
     PageSection.Text,
     PageSection.Links,
     PageSection.Tables,
+    PageSection.GitHub,
   ],
   [PageContextProfile.Metadata]: [PageSection.Metadata],
 };
@@ -79,7 +82,31 @@ export const INTENT_SECTIONS: Record<AIIntent, readonly Section[]> = {
     PageSection.Links,
     PageSection.Selection,
   ],
-};
+  // Phase 7 — developer intents also need the GitHub structure of the page
+  // (and nothing else: code and diffs travel through the developer context,
+  // not through the generic page sections).
+  ...developerSections(),
+} as Record<AIIntent, readonly Section[]>;
+
+/**
+ * Phase 7 — the sections every developer intent captures: structure and text
+ * from Phase 2 plus the typed GitHub context. Code bodies and diff excerpts
+ * travel in the developer context block instead of being duplicated here.
+ */
+function developerSections(): Record<DeveloperIntent, readonly Section[]> {
+  const sections: readonly Section[] = [
+    PageSection.Metadata,
+    PageSection.Headings,
+    PageSection.Text,
+    PageSection.Links,
+    PageSection.GitHub,
+  ];
+  const out = {} as Record<DeveloperIntent, readonly Section[]>;
+  for (const intent of DEVELOPER_INTENTS) {
+    out[intent] = sections;
+  }
+  return out;
+}
 
 export function sectionsForIntent(intent: AIIntent): readonly Section[] {
   return INTENT_SECTIONS[intent];

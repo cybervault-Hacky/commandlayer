@@ -7,6 +7,8 @@ import { WorkflowPreviewCard } from '@/shared/components/WorkflowPreviewCard';
 import { WorkflowProgressCard } from '@/shared/components/WorkflowProgressCard';
 import { MemoryPreviewCard } from '@/shared/components/MemoryPreviewCard';
 import { MemoryResultCard } from '@/shared/components/MemoryResultCard';
+import { DeveloperChangePlanCard } from '@/shared/components/DeveloperChangePlanCard';
+import { DeveloperResultCard } from '@/shared/components/DeveloperResultCard';
 import { IconSparkle } from '@/shared/components/icons';
 
 export interface TranscriptUserTurn {
@@ -136,6 +138,23 @@ export function SessionTranscript({
                   ) : entry.result.memoryResult ? (
                     /* Phase 6: "Memory saved." / "Memory deleted." */
                     <MemoryResultCard result={entry.result.memoryResult} />
+                  ) : entry.result.developer ? (
+                    /* Phase 7: a developer turn — the analysed result, and
+                     * the change plan when one was produced (read-only in
+                     * the log: activation happens in the live surface). */
+                    <>
+                      <DeveloperResultCard result={entry.result.developer} />
+                      {entry.result.developer.plan && (
+                        <div className="mt-3">
+                          <DeveloperChangePlanCard
+                            result={entry.result.developer}
+                            actionPlan={entry.result.plan ?? null}
+                            execution={entry.result.execution ?? null}
+                            readOnly
+                          />
+                        </div>
+                      )}
+                    </>
                   ) : entry.result.execution ? (
                     /* Phase 4: executed plans render their verified
                      * outcome inline (read-only). */
@@ -143,7 +162,7 @@ export function SessionTranscript({
                       plan={entry.result.plan ?? null}
                       execution={entry.result.execution}
                     />
-                  ) : entry.result.plan ? (
+                  ) : entry.result.plan && !entry.result.developer ? (
                     /* Proposed but not executed: read-only preview. */
                     <ActionPreviewCard
                       plan={entry.result.plan}
